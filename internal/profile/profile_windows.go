@@ -48,8 +48,10 @@ func Run(name string) error {
 	w := &worker{conn: conn, ctx: ctx}
 	// MyGo v0.6.4 has one environment per process, keyed by application name.
 	mygo.App.SetName(name)
-	// Windows sets the WebView2 environment's language once, from the app's
-	// languages, so WhatsApp's requests carry it: set it before any window.
+	// Windows creates one WebView2 environment per process, from the app's
+	// first language, when the first window is made: this has to run before,
+	// and changing it later needs a new worker. The user's languages follow
+	// as fallbacks, so Indonesian leads the requests.
 	mygo.App.SetLanguages("id")
 	mygo.Bind(&ProfileBridge{conn: conn})
 	mygo.App.WhenReady(func() { w.open(cancel) })
