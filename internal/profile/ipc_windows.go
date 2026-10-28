@@ -14,18 +14,34 @@ import (
 
 // Message is sent only over the private pipe to the workspace process.
 type Message struct {
-	Kind   string  `json:"kind"`
-	HWND   uintptr `json:"hwnd,omitempty"`
-	Title  string  `json:"title,omitempty"`
-	Body   string  `json:"body,omitempty"`
-	Silent bool    `json:"silent,omitempty"`
-	Token  string  `json:"token,omitempty"`
-	URL    string  `json:"url,omitempty"`
+	Kind    string        `json:"kind"`
+	ID      string        `json:"id,omitempty"`
+	HWND    uintptr       `json:"hwnd,omitempty"`
+	Title   string        `json:"title,omitempty"`
+	Body    string        `json:"body,omitempty"`
+	Silent  bool          `json:"silent,omitempty"`
+	Token   string        `json:"token,omitempty"`
+	URL     string        `json:"url,omitempty"`
+	Audio   []MediaDevice `json:"audio,omitempty"`
+	Video   []MediaDevice `json:"video,omitempty"`
+	AudioID string        `json:"audioId,omitempty"`
+	VideoID string        `json:"videoId,omitempty"`
+	Err     string        `json:"err,omitempty"`
 }
 
-type command struct {
-	Action string `json:"action"`
-	Token  string `json:"token"`
+// MediaDevice is a microphone or camera the profile's WebView2 reports.
+type MediaDevice struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// Command is a request from the workspace process over the private pipe.
+type Command struct {
+	Action  string `json:"action"`
+	ID      string `json:"id"`
+	Token   string `json:"token"`
+	AudioID string `json:"audioId"`
+	VideoID string `json:"videoId"`
 }
 
 // One reader owns stdin; the encoder is shared by page callbacks and bound methods.
@@ -39,8 +55,8 @@ func newConnection(input io.Reader, output io.Writer) *connection {
 	return &connection{input: bufio.NewScanner(input), output: json.NewEncoder(output)}
 }
 
-func (c *connection) receive() (command, error) {
-	var cmd command
+func (c *connection) receive() (Command, error) {
+	var cmd Command
 	if !c.input.Scan() {
 		if err := c.input.Err(); err != nil {
 			return cmd, fmt.Errorf("membaca kanal profil: %w", err)
@@ -50,11 +66,19 @@ func (c *connection) receive() (command, error) {
 	if err := json.Unmarshal(c.input.Bytes(), &cmd); err != nil {
 		return cmd, fmt.Errorf("perintah profil tidak valid: %w", err)
 	}
+	if len(cmd.ID) > 64 {
+		return cmd, errors.New("ID permintaan terlalu panjang")
+	}
 	switch cmd.Action {
-	case "start", "reload", "quit":
+	case "start", "reload", "quit", "devtools":
 	case "click":
 		if len(cmd.Token) > 128 {
 			return cmd, errors.New("token notifikasi terlalu panjang")
+		}
+	case "media":
+	case "setmedia":
+		if len(cmd.AudioID) > 256 || len(cmd.VideoID) > 256 {
+			return cmd, errors.New("ID perangkat terlalu panjang")
 		}
 	default:
 		return cmd, fmt.Errorf("perintah profil tidak dikenal: %q", cmd.Action)

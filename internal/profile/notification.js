@@ -1,13 +1,5 @@
 (() => {
   if (location.origin !== 'https://web.whatsapp.com' || window !== window.top) return;
-  // WebView2 reports this origin as not persisted; the earlier Wails build
-  // polyfilled the same two calls for WhatsApp. Measured in a real WebView2:
-  // persisted() is true with this and false without it, while the IndexedDB
-  // stores are created either way, so this only settles the permission flag.
-  if (navigator.storage) {
-    navigator.storage.persist = () => Promise.resolve(true);
-    navigator.storage.persisted = () => Promise.resolve(true);
-  }
   const notifications = new Map();
   let sequence = 0;
   class DesktopNotification extends EventTarget {

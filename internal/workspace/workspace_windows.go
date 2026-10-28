@@ -53,6 +53,30 @@ type profileProcess struct {
 	done     chan struct{}
 	stopping atomic.Bool
 	job      *win32.ProcessJob
+	// One writer at a time: the encoder is not safe for concurrent use, and
+	// bound methods, the UI and media requests all write to the pipe.
+	writeMu sync.Mutex
+	// pending holds the replies awaited by request, by request ID.
+	pending sync.Map
+}
+
+// expect registers the channel that receives the reply to id.
+func (p *profileProcess) expect(id string) chan profile.Message {
+	ch := make(chan profile.Message, 1)
+	p.pending.Store(id, ch)
+	return ch
+}
+
+func (p *profileProcess) forget(id string) { p.pending.Delete(id) }
+
+// replyTo returns the channel waiting for the reply to id, if any.
+func (p *profileProcess) replyTo(id string) (chan profile.Message, bool) {
+	value, ok := p.pending.Load(id)
+	if !ok {
+		return nil, false
+	}
+	ch, ok := value.(chan profile.Message)
+	return ch, ok
 }
 
 type Workspace struct {
@@ -304,11 +328,142 @@ func (w *Workspace) Reload() error {
 	return w.send(w.processes[w.data.ActiveID], "reload")
 }
 
-func (w *Workspace) TestNotification() error {
+// ClearCache clears the downloaded web content of the active profile only.
+// Cookies, local storage and IndexedDB are kept, so the tab reopens signed in.
+func (w *Workspace) ClearCache() error {
 	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closing.Load() {
+		return errors.New("aplikasi sedang ditutup")
+	}
 	id := w.data.ActiveID
-	w.mu.Unlock()
-	return w.notify(id, profile.Message{Title: "Notifikasi Windows", Body: "Notifikasi dan suara sistem aktif. Klik untuk membuka tab ini."})
+	if id == "" {
+		return errors.New("tidak ada tab aktif")
+	}
+	// WebView2 maps its cache files, so they are cleared with the worker down.
+	w.stop(id)
+	err := clearCache(profileDirectory(profileName(id)))
+	if startErr := w.start(id); startErr != nil {
+		return errors.Join(err, startErr)
+	}
+	w.place()
+	return err
+}
+
+// OpenDevTools opens the web inspector of the active profile, also in builds
+// made for release.
+func (w *Workspace) OpenDevTools() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.data.ActiveID == "" {
+		return errors.New("tidak ada tab aktif")
+	}
+	if err := w.start(w.data.ActiveID); err != nil {
+		return err
+	}
+	return w.send(w.processes[w.data.ActiveID], "devtools")
+}
+
+// MediaSettings is the microphone and camera choice of the active profile,
+// with the devices its own WebView2 reports.
+type MediaSettings struct {
+	Audio   []MediaDevice `json:"audio"`
+	Video   []MediaDevice `json:"video"`
+	AudioID string        `json:"audioId"`
+	VideoID string        `json:"videoId"`
+}
+
+// MediaDevice is a microphone or camera of the profile.
+type MediaDevice struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// MediaDevices lists the microphones and cameras of the active profile and the
+// device it has chosen. The list comes from the profile's WebView2 page, which
+// is the only place the real devices exist.
+func (w *Workspace) MediaDevices() (MediaSettings, error) {
+	p, err := w.activeProcess()
+	if err != nil {
+		return MediaSettings{}, err
+	}
+	msg, err := w.request(p, profile.Command{Action: "media"})
+	if err != nil {
+		return MediaSettings{}, err
+	}
+	devices := func(list []profile.MediaDevice) []MediaDevice {
+		out := make([]MediaDevice, 0, len(list))
+		for _, d := range list {
+			out = append(out, MediaDevice{ID: d.ID, Label: d.Label})
+		}
+		return out
+	}
+	return MediaSettings{
+		Audio: devices(msg.Audio), Video: devices(msg.Video),
+		AudioID: msg.AudioID, VideoID: msg.VideoID,
+	}, nil
+}
+
+// SetMediaDevices chooses the microphone and camera of the active profile.
+// Empty IDs mean the system default. The choice is stored in the profile, so
+// every call it makes, popups included, uses it.
+func (w *Workspace) SetMediaDevices(audioID, videoID string) error {
+	if len(audioID) > 256 || len(videoID) > 256 {
+		return errors.New("ID perangkat tidak valid")
+	}
+	p, err := w.activeProcess()
+	if err != nil {
+		return err
+	}
+	_, err = w.request(p, profile.Command{Action: "setmedia", AudioID: audioID, VideoID: videoID})
+	return err
+}
+
+// activeProcess returns the worker of the active tab, starting it if needed.
+func (w *Workspace) activeProcess() (*profileProcess, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closing.Load() {
+		return nil, errors.New("aplikasi sedang ditutup")
+	}
+	id := w.data.ActiveID
+	if id == "" {
+		return nil, errors.New("tidak ada tab aktif")
+	}
+	if err := w.start(id); err != nil {
+		return nil, err
+	}
+	p := w.processes[id]
+	if p == nil {
+		return nil, errors.New("profil aktif tidak berjalan")
+	}
+	return p, nil
+}
+
+// request sends a command and waits for the reply with its ID. The worker
+// answers media requests with Message.Err set when it fails.
+func (w *Workspace) request(p *profileProcess, cmd profile.Command) (profile.Message, error) {
+	var id [8]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return profile.Message{}, err
+	}
+	cmd.ID = hex.EncodeToString(id[:])
+	reply := p.expect(cmd.ID)
+	defer p.forget(cmd.ID)
+	if err := w.sendCommand(p, cmd); err != nil {
+		return profile.Message{}, fmt.Errorf("mengirim permintaan ke profil: %w", err)
+	}
+	select {
+	case msg := <-reply:
+		if msg.Err != "" {
+			return msg, errors.New(msg.Err)
+		}
+		return msg, nil
+	case <-p.done:
+		return profile.Message{}, errors.New("profil berhenti sebelum menjawab")
+	case <-time.After(20 * time.Second):
+		return profile.Message{}, errors.New("profil tidak menjawab permintaan perangkat")
+	}
 }
 
 func profileName(id string) string { return mygo.App.Name() + "-profile-" + id }
@@ -399,6 +554,13 @@ func (w *Workspace) start(id string) error {
 						WorkerError.Emit(w.window, err.Error())
 					}
 				}
+			case "media":
+				if ch, ok := p.replyTo(msg.ID); ok {
+					select {
+					case ch <- msg:
+					default:
+					}
+				}
 			case "dismiss":
 				if n, ok := w.notifications.LoadAndDelete(id + "/" + msg.Token); ok {
 					n.(*mygo.Notification).Close()
@@ -439,7 +601,13 @@ func (w *Workspace) start(id string) error {
 }
 
 func (w *Workspace) send(p *profileProcess, action string) error {
-	return json.NewEncoder(p.input).Encode(map[string]string{"action": action})
+	return w.sendCommand(p, profile.Command{Action: action})
+}
+
+func (w *Workspace) sendCommand(p *profileProcess, cmd profile.Command) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	return json.NewEncoder(p.input).Encode(cmd)
 }
 func (w *Workspace) stop(id string) {
 	p := w.processes[id]
@@ -514,7 +682,7 @@ func (w *Workspace) notify(id string, msg profile.Message) error {
 			}
 			w.mu.Lock()
 			if p := w.processes[id]; p != nil && msg.Token != "" {
-				if err := json.NewEncoder(p.input).Encode(map[string]string{"action": "click", "token": msg.Token}); err != nil {
+				if err := w.sendCommand(p, profile.Command{Action: "click", Token: msg.Token}); err != nil {
 					WorkerError.Emit(w.window, "Gagal membuka percakapan dari notifikasi: "+err.Error())
 				}
 			}

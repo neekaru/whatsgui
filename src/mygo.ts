@@ -12,6 +12,23 @@ export interface Bounds {
   scale: number;
 }
 
+/** MediaDevice is a microphone or camera of the profile. */
+export interface MediaDevice {
+  id: string;
+  label: string;
+}
+
+/**
+ * MediaSettings is the microphone and camera choice of the active profile,
+ * with the devices its own WebView2 reports.
+ */
+export interface MediaSettings {
+  audio: MediaDevice[];
+  video: MediaDevice[];
+  audioId: string;
+  videoId: string;
+}
+
 export interface State {
   tabs: Tab[];
   activeId: string;
@@ -28,8 +45,30 @@ export const Workspace = {
   activate(id: string): Promise<State> {
     return call("Workspace.Activate", id);
   },
+  /**
+   * ClearCache clears the downloaded web content of the active profile only.
+   * Cookies, local storage and IndexedDB are kept, so the tab reopens signed in.
+   */
+  clearCache(): Promise<void> {
+    return call("Workspace.ClearCache");
+  },
   create(name: string): Promise<State> {
     return call("Workspace.Create", name);
+  },
+  /**
+   * MediaDevices lists the microphones and cameras of the active profile and the
+   * device it has chosen. The list comes from the profile's WebView2 page, which
+   * is the only place the real devices exist.
+   */
+  mediaDevices(): Promise<MediaSettings> {
+    return call("Workspace.MediaDevices");
+  },
+  /**
+   * OpenDevTools opens the web inspector of the active profile, also in builds
+   * made for release.
+   */
+  openDevTools(): Promise<void> {
+    return call("Workspace.OpenDevTools");
   },
   reload(): Promise<void> {
     return call("Workspace.Reload");
@@ -43,11 +82,16 @@ export const Workspace = {
   resize(bounds: Bounds): Promise<void> {
     return call("Workspace.Resize", bounds);
   },
+  /**
+   * SetMediaDevices chooses the microphone and camera of the active profile.
+   * Empty IDs mean the system default. The choice is stored in the profile, so
+   * every call it makes, popups included, uses it.
+   */
+  setMediaDevices(audioID: string, videoID: string): Promise<void> {
+    return call("Workspace.SetMediaDevices", audioID, videoID);
+  },
   state(): Promise<State> {
     return call("Workspace.State");
-  },
-  testNotification(): Promise<void> {
-    return call("Workspace.TestNotification");
   },
 } as const;
 

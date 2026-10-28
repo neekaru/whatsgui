@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { currentWindow } from "mygo-runtime";
-  import { Workspace, events, type State } from "./mygo";
+  import { Workspace, events, type State, type MediaSettings } from "./mygo";
 
-  type Pending = "startup" | "create" | "rename" | "remove" | "activate" | "reload" | "notify";
+  type Pending = "startup" | "create" | "rename" | "remove" | "activate" | "reload" | "cache" | "devices" | "devtools";
   type Form = "none" | "create" | "rename" | "delete";
 
   let model = $state<State>({ tabs: [], activeId: "" });
@@ -14,6 +14,14 @@
   let name = $state("");
   let target = $state<string | null>(null);
   let maximized = $state(false);
+  let settingsOpen = $state(false);
+  let theme = $state<"system" | "light" | "dark">("system");
+  let devices = $state<MediaSettings | null>(null);
+  let audioId = $state("");
+  let videoId = $state("");
+  let devicesLoading = $state(false);
+  let settingsMessage = $state("");
+  let deviceRequest = 0;
 
   let view = $state<HTMLElement>();
   let tablist = $state<HTMLElement>();
@@ -102,9 +110,63 @@
     await run("reload", () => Workspace.reload());
   }
 
-  async function testNotification() {
-    await run("notify", () => Workspace.testNotification());
+  function setTheme(value: "system" | "light" | "dark") {
+    theme = value;
+    document.documentElement.dataset.theme = value;
+    localStorage.setItem("workspace-theme", value);
   }
+
+  async function loadDevices(id: string) {
+    const request = ++deviceRequest;
+    devices = null;
+    if (!id) return;
+    error = "";
+    devicesLoading = true;
+    try {
+      const result = await Workspace.mediaDevices();
+      if (request !== deviceRequest) return;
+      devices = result;
+      audioId = result.audioId;
+      videoId = result.videoId;
+    } catch (e) {
+      if (request === deviceRequest) error = reason(e);
+    } finally {
+      if (request === deviceRequest) devicesLoading = false;
+    }
+  }
+
+  async function saveDevices() {
+    settingsMessage = "";
+    const ok = await run("devices", async () => {
+      await Workspace.setMediaDevices(audioId, videoId);
+      return true;
+    });
+    if (ok) settingsMessage = "Perangkat disimpan untuk panggilan berikutnya.";
+  }
+
+  async function clearCache() {
+    settingsMessage = "";
+    deviceRequest++;
+    devicesLoading = false;
+    devices = null;
+    const ok = await run("cache", async () => {
+      await Workspace.clearCache();
+      return true;
+    });
+    if (ok) {
+      settingsMessage = "Cache profil aktif dibersihkan.";
+      if (settingsOpen && model.activeId) void loadDevices(model.activeId);
+    }
+  }
+
+  $effect(() => {
+    const id = model.activeId;
+    if (settingsOpen) void loadDevices(id);
+    else {
+      deviceRequest++;
+      devicesLoading = false;
+    }
+  });
 
   // Window controls are the real OS ones: the page draws the captions.
   async function syncMaximized() {
@@ -218,6 +280,8 @@
   });
 
   onMount(() => {
+    const storedTheme = localStorage.getItem("workspace-theme");
+    setTheme(storedTheme === "dark" || storedTheme === "light" ? storedTheme : "system");
     const offState = events.workspaceChanged.on((next) => {
       model = next;
       if (target && !next.tabs.some((tab) => tab.id === target)) {
@@ -233,6 +297,9 @@
       if (e.key === "Escape" && form !== "none") {
         e.preventDefault();
         void closeForm();
+      } else if (e.key === "Escape" && settingsOpen) {
+        e.preventDefault();
+        settingsOpen = false;
       }
     };
     window.addEventListener("keydown", onEscape);
@@ -397,14 +464,9 @@
         <button class="btn" type="button" disabled={busy || !active} onclick={reloadProfile}>
           {pending === "reload" ? "Memuat…" : "Muat ulang"}
         </button>
-        <button
-          class="btn"
-          type="button"
-          disabled={busy || !active}
-          title="Kirim notifikasi uji dengan suara. Klik notifikasi untuk membuka profil."
-          onclick={testNotification}
-        >
-          {pending === "notify" ? "Mengirim…" : "Tes notifikasi"}
+        <button class="btn" type="button" disabled={busy} aria-expanded={settingsOpen}
+          onclick={() => { settingsOpen = !settingsOpen; settingsMessage = ""; }}>
+          Pengaturan
         </button>
       </div>
     {/if}
@@ -415,6 +477,63 @@
       <p>{error}</p>
       <button class="btn" type="button" onclick={() => (error = "")}>Tutup</button>
     </div>
+  {/if}
+  {#if settingsOpen}
+    <section class="settings" aria-label="Pengaturan">
+      <div class="settings-heading">
+        <h2>Pengaturan</h2>
+        <button class="btn" type="button" onclick={() => (settingsOpen = false)}>Tutup</button>
+      </div>
+      <div class="settings-grid">
+        <label class="setting">
+          <span>Tema aplikasi</span>
+          <select value={theme} onchange={(e) => setTheme(e.currentTarget.value as "system" | "light" | "dark")}>
+            <option value="system">Ikuti sistem</option>
+            <option value="light">Terang</option>
+            <option value="dark">Gelap</option>
+          </select>
+        </label>
+        <label class="setting">
+          <span>Mikrofon</span>
+          <select bind:value={audioId} disabled={busy || devicesLoading || !devices}>
+            <option value="">Default sistem</option>
+            {#if audioId && !devices?.audio.some((device) => device.id === audioId)}
+              <option value={audioId}>Perangkat tersimpan tidak tersedia</option>
+            {/if}
+            {#each devices?.audio ?? [] as device (device.id)}
+              <option value={device.id}>{device.label || "Mikrofon"}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="setting">
+          <span>Kamera</span>
+          <select bind:value={videoId} disabled={busy || devicesLoading || !devices}>
+            <option value="">Default sistem</option>
+            {#if videoId && !devices?.video.some((device) => device.id === videoId)}
+              <option value={videoId}>Perangkat tersimpan tidak tersedia</option>
+            {/if}
+            {#each devices?.video ?? [] as device (device.id)}
+              <option value={device.id}>{device.label || "Kamera"}</option>
+            {/each}
+          </select>
+        </label>
+        <div class="settings-actions">
+          <button class="btn" type="button" disabled={busy || devicesLoading || !devices} onclick={saveDevices}>Simpan perangkat</button>
+          <button class="btn" type="button" disabled={busy || devicesLoading || !active}
+            onclick={() => loadDevices(model.activeId)}>Muat ulang perangkat</button>
+          <button class="btn" type="button" disabled={busy || !active} onclick={clearCache}>Bersihkan cache</button>
+          <button class="btn" type="button" disabled={busy || !active}
+            onclick={() => run("devtools", () => Workspace.openDevTools())}>Buka DevTools</button>
+        </div>
+      </div>
+      <p class="settings-note">
+        {#if devicesLoading}Memuat perangkat…
+        {:else if settingsMessage}{settingsMessage}
+        {:else}Berlaku untuk profil aktif. Kamera dapat menyala sesaat saat memuat daftar perangkat.
+          Pembersihan cache memuat ulang profil dan mengakhiri panggilan; sesi tetap disimpan.
+          Jika perangkat tersimpan tidak tersedia, pilih perangkat lain atau default sistem.{/if}
+      </p>
+    </section>
   {/if}
 
   <div
