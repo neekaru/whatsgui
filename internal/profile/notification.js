@@ -1,5 +1,12 @@
 (() => {
   if (location.origin !== 'https://web.whatsapp.com' || window !== window.top) return;
+  // WebView2 reports this origin as not persisted, and WhatsApp Web then never
+  // opens its IndexedDB store: no storage DB, so no storage-mutated events.
+  // The same polyfill the earlier Wails builds needed.
+  if (navigator.storage) {
+    navigator.storage.persist = () => Promise.resolve(true);
+    navigator.storage.persisted = () => Promise.resolve(true);
+  }
   const notifications = new Map();
   let sequence = 0;
   class DesktopNotification extends EventTarget {
