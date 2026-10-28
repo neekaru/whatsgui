@@ -1,0 +1,24 @@
+{
+  "name": "whatsappgui-new",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "mygo dev",
+    "build": "mygo build",
+    "generate": "mygo generate",
+    "dev:web": "vite",
+    "build:web": "bun run typecheck && vite build",
+    "typecheck": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "mygo-runtime": "^0.6.4"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "mygo-cli": "^0.6.4",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.7",
+    "typescript": "^6",
+    "vite": "^8"
+  }
+}

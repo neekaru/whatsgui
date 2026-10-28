@@ -1,0 +1,533 @@
+package workspace
+
+import (
+	"bufio"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"syscall"
+	"time"
+	"unicode/utf8"
+
+	"github.com/egoist/mygo"
+	"whatsappgui-new/internal/profile"
+	"whatsappgui-new/internal/win32"
+)
+
+type Tab struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type State struct {
+	Tabs     []Tab  `json:"tabs"`
+	ActiveID string `json:"activeId"`
+}
+
+type Bounds struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+	Scale  float64 `json:"scale"`
+}
+
+var WorkspaceChanged = mygo.NewEvent[State]("workspaceChanged")
+var WorkerError = mygo.NewEvent[string]("workerError")
+
+type profileProcess struct {
+	cmd      *exec.Cmd
+	input    io.WriteCloser
+	hwnd     uintptr
+	done     chan struct{}
+	stopping atomic.Bool
+	job      *win32.ProcessJob
+}
+
+type Workspace struct {
+	mu            sync.Mutex
+	data          State
+	file          string
+	window        *mygo.Window
+	processes     map[string]*profileProcess
+	bounds        Bounds
+	closing       atomic.Bool
+	notifications sync.Map
+	deletedIDs    []string
+}
+
+func openWorkspace() (*Workspace, error) {
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		return nil, err
+	}
+	w := &Workspace{file: filepath.Join(dir, "tabs.json"), processes: make(map[string]*profileProcess)}
+	data, err := os.ReadFile(w.file)
+	if errors.Is(err, os.ErrNotExist) {
+		w.data = State{Tabs: []Tab{newTab("WhatsApp 1")}}
+		w.data.ActiveID = w.data.Tabs[0].ID
+		return w, w.save(w.data)
+	}
+	if err != nil {
+		return nil, err
+	}
+	var stored storedState
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return nil, fmt.Errorf("tabs.json tidak valid: %w", err)
+	}
+	w.data, w.deletedIDs = stored.State, stored.DeletedIDs
+	seen := map[string]bool{}
+	for _, tab := range w.data.Tabs {
+		if !profile.ValidID(tab.ID) || seen[tab.ID] {
+			return nil, errors.New("ID profil dalam tabs.json tidak valid/duplikat")
+		}
+		if _, err := cleanName(tab.Name); err != nil {
+			return nil, err
+		}
+		seen[tab.ID] = true
+	}
+	if len(w.data.Tabs) == 0 {
+		w.data.Tabs = []Tab{}
+		w.data.ActiveID = ""
+	} else if !seen[w.data.ActiveID] {
+		return nil, errors.New("tab aktif dalam tabs.json tidak ditemukan")
+	}
+	for _, id := range w.deletedIDs {
+		if !profile.ValidID(id) || seen[id] {
+			return nil, errors.New("antrean penghapusan profil tidak valid")
+		}
+		seen[id] = true
+	}
+	return w, nil
+}
+
+func newTab(name string) Tab {
+	var id [16]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		panic(err)
+	}
+	return Tab{ID: hex.EncodeToString(id[:]), Name: name}
+}
+
+func cleanName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" || utf8.RuneCountInString(name) > 60 || strings.ContainsAny(name, "\r\n\x00") {
+		return "", errors.New("nama tab harus 1–60 karakter tanpa baris baru")
+	}
+	return name, nil
+}
+
+func (w *Workspace) save(state State) error {
+	data, err := json.MarshalIndent(storedState{State: state, DeletedIDs: w.deletedIDs}, "", "  ")
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(w.file), "tabs-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(file.Name())
+	if _, err := file.Write(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(file.Name(), w.file)
+}
+
+func (w *Workspace) snapshot() State {
+	return State{Tabs: slices.Clone(w.data.Tabs), ActiveID: w.data.ActiveID}
+}
+func (w *Workspace) index(id string) int {
+	return slices.IndexFunc(w.data.Tabs, func(t Tab) bool { return t.ID == id })
+}
+
+func (w *Workspace) State() (State, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, tab := range w.data.Tabs {
+		if err := w.start(tab.ID); err != nil {
+			return w.snapshot(), err
+		}
+	}
+	w.place()
+	return w.snapshot(), nil
+}
+
+func (w *Workspace) Create(name string) (State, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return State{}, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closing.Load() {
+		return State{}, errors.New("aplikasi sedang ditutup")
+	}
+	tab := newTab(name)
+	state := w.snapshot()
+	state.Tabs = append(state.Tabs, tab)
+	state.ActiveID = tab.ID
+	if err := w.start(tab.ID); err != nil {
+		return State{}, err
+	}
+	if err := w.save(state); err != nil {
+		w.stop(tab.ID)
+		return State{}, err
+	}
+	w.data = state
+	w.place()
+	return w.snapshot(), nil
+}
+
+func (w *Workspace) Rename(id, name string) (State, error) {
+	name, err := cleanName(name)
+	if err != nil {
+		return State{}, err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	i := w.index(id)
+	if i < 0 {
+		return State{}, errors.New("tab tidak ditemukan")
+	}
+	state := w.snapshot()
+	state.Tabs[i].Name = name
+	if err := w.save(state); err != nil {
+		return State{}, err
+	}
+	w.data = state
+	return w.snapshot(), nil
+}
+
+func (w *Workspace) Activate(id string) (State, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.index(id) < 0 {
+		return State{}, errors.New("tab tidak ditemukan")
+	}
+	if err := w.start(id); err != nil {
+		return State{}, err
+	}
+	state := w.snapshot()
+	state.ActiveID = id
+	if err := w.save(state); err != nil {
+		return State{}, err
+	}
+	w.data = state
+	w.place()
+	return w.snapshot(), nil
+}
+
+func (w *Workspace) Remove(id string) (State, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	i := w.index(id)
+	if i < 0 {
+		return State{}, errors.New("tab tidak ditemukan")
+	}
+	state := w.snapshot()
+	state.Tabs = append(state.Tabs[:i:i], state.Tabs[i+1:]...)
+	if state.ActiveID == id {
+		state.ActiveID = ""
+		if len(state.Tabs) > 0 {
+			state.ActiveID = state.Tabs[min(i, len(state.Tabs)-1)].ID
+		}
+	}
+	// Persist deletion intent before touching login data. A locked cache may be
+	// cleaned later, but must never resurrect the tab or lose its deletion request.
+	previous := w.deletedIDs
+	w.deletedIDs = append(slices.Clone(previous), id)
+	if err := w.save(state); err != nil {
+		w.deletedIDs = previous
+		return State{}, err
+	}
+	w.data = state
+	w.stop(id)
+	w.notifications.Range(func(key, value any) bool {
+		if strings.HasPrefix(key.(string), id+"/") {
+			value.(*mygo.Notification).Close()
+			w.notifications.Delete(key)
+		}
+		return true
+	})
+	w.place()
+	if err := w.cleanupDeleted(); err != nil && w.window != nil {
+		WorkerError.Emit(w.window, "Tab dihapus; pembersihan data tertunda dan akan dicoba saat aplikasi dibuka: "+err.Error())
+	}
+	return w.snapshot(), nil
+}
+
+func (w *Workspace) Resize(bounds Bounds) error {
+	for _, n := range []float64{bounds.X, bounds.Y, bounds.Width, bounds.Height, bounds.Scale} {
+		if math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n > 32768 {
+			return errors.New("ukuran viewport tidak valid")
+		}
+	}
+	if bounds.Scale < 0.25 || bounds.Scale > 8 {
+		return errors.New("skala viewport tidak valid")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.bounds = bounds
+	w.place()
+	return nil
+}
+
+func (w *Workspace) Reload() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.data.ActiveID == "" {
+		return errors.New("tidak ada tab aktif")
+	}
+	if err := w.start(w.data.ActiveID); err != nil {
+		return err
+	}
+	w.place()
+	return w.send(w.processes[w.data.ActiveID], "reload")
+}
+
+func (w *Workspace) TestNotification() error {
+	w.mu.Lock()
+	id := w.data.ActiveID
+	w.mu.Unlock()
+	return w.notify(id, profile.Message{Title: "Notifikasi Windows", Body: "Notifikasi dan suara sistem aktif. Klik untuk membuka tab ini."})
+}
+
+func profileName(id string) string { return mygo.App.Name() + "-profile-" + id }
+func profileDirectory(name string) string {
+	dir := os.Getenv("LOCALAPPDATA")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	return filepath.Join(dir, name)
+}
+
+func (w *Workspace) start(id string) error {
+	if w.closing.Load() {
+		return errors.New("aplikasi sedang ditutup")
+	}
+	if p := w.processes[id]; p != nil {
+		select {
+		case <-p.done:
+			w.stop(id)
+		default:
+			return nil
+		}
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "--profile", profileName(id))
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd.Stderr = os.Stderr
+	// Keep background WhatsApp audio enabled; do not inherit the shell's debugging port.
+	cmd.Env = append(os.Environ(), "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--autoplay-policy=no-user-gesture-required")
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		input.Close()
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		input.Close()
+		return err
+	}
+	p := &profileProcess{cmd: cmd, input: input, done: make(chan struct{})}
+	job, err := win32.ContainProcess(cmd.Process.Pid)
+	if err != nil {
+		input.Close()
+		cmd.Process.Kill()
+		cmd.Wait()
+		out.Close()
+		return fmt.Errorf("mengisolasi proses profil: %w", err)
+	}
+	p.job = job
+	if err := w.send(p, "start"); err != nil {
+		job.Close()
+		input.Close()
+		cmd.Wait()
+		out.Close()
+		return err
+	}
+	ready := make(chan uintptr, 1)
+	go func() {
+		scanner := bufio.NewScanner(out)
+		for scanner.Scan() {
+			var msg profile.Message
+			if json.Unmarshal(scanner.Bytes(), &msg) != nil {
+				continue
+			}
+			switch msg.Kind {
+			case "ready":
+				select {
+				case ready <- msg.HWND:
+				default:
+				}
+			case "notify":
+				go func(m profile.Message) {
+					if err := w.notify(id, m); err != nil {
+						WorkerError.Emit(w.window, err.Error())
+					}
+				}(msg)
+			case "error":
+				WorkerError.Emit(w.window, msg.Body)
+			case "external":
+				if strings.HasPrefix(msg.URL, "https://") || strings.HasPrefix(msg.URL, "http://") {
+					if err := mygo.Shell.OpenExternal(msg.URL); err != nil {
+						WorkerError.Emit(w.window, err.Error())
+					}
+				}
+			case "dismiss":
+				if n, ok := w.notifications.LoadAndDelete(id + "/" + msg.Token); ok {
+					n.(*mygo.Notification).Close()
+				}
+			}
+		}
+		cmd.Wait()
+		close(p.done)
+		if !w.closing.Load() && !p.stopping.Load() {
+			WorkerError.Emit(w.window, "Proses tab berhenti. Pilih tab atau Muat ulang untuk membukanya kembali.")
+		}
+	}()
+	select {
+	case hwnd := <-ready:
+		p.hwnd = hwnd
+		var attachErr error
+		mygo.RunOnMain(func() { attachErr = win32.Attach(hwnd, w.window.NativeHandle()) })
+		if attachErr != nil {
+			input.Close()
+			cmd.Process.Kill()
+			job.Close()
+			<-p.done
+			return attachErr
+		}
+		w.processes[id] = p
+		return nil
+	case <-p.done:
+		input.Close()
+		job.Close()
+		return errors.New("proses profil gagal dimulai")
+	case <-time.After(30 * time.Second):
+		input.Close()
+		cmd.Process.Kill()
+		job.Close()
+		<-p.done
+		return errors.New("waktu memulai profil habis")
+	}
+}
+
+func (w *Workspace) send(p *profileProcess, action string) error {
+	return json.NewEncoder(p.input).Encode(map[string]string{"action": action})
+}
+func (w *Workspace) stop(id string) {
+	p := w.processes[id]
+	if p == nil {
+		return
+	}
+	p.stopping.Store(true)
+	delete(w.processes, id)
+	w.send(p, "quit")
+	p.input.Close()
+	select {
+	case <-p.done:
+	case <-time.After(5 * time.Second):
+		// Terminate the entire contained tree below, not only its worker.
+	}
+	if err := p.job.Close(); err != nil {
+		p.cmd.Process.Kill()
+		if w.window != nil {
+			WorkerError.Emit(w.window, err.Error())
+		}
+	}
+	<-p.done
+}
+func (w *Workspace) place() {
+	if len(w.processes) == 0 {
+		return
+	}
+	mygo.RunOnMain(func() {
+		b := w.bounds
+		pixel := func(n float64) int { return int(math.Round(n * b.Scale)) }
+		for id, p := range w.processes {
+			win32.Place(p.hwnd, pixel(b.X), pixel(b.Y), pixel(b.Width), pixel(b.Height), id == w.data.ActiveID)
+		}
+	})
+}
+func (w *Workspace) close() {
+	if !w.closing.CompareAndSwap(false, true) {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for id := range w.processes {
+		w.stop(id)
+	}
+}
+
+func (w *Workspace) notify(id string, msg profile.Message) error {
+	w.mu.Lock()
+	i := w.index(id)
+	if i < 0 {
+		w.mu.Unlock()
+		return errors.New("tab notifikasi tidak ditemukan")
+	}
+	name := w.data.Tabs[i].Name
+	w.mu.Unlock()
+	if !mygo.NotificationsSupported() {
+		return errors.New("notifikasi sistem tidak tersedia")
+	}
+	n := mygo.NewNotification(mygo.NotificationOptions{Title: name + " — " + msg.Title, Body: msg.Body, Silent: msg.Silent})
+	key := id + "/" + msg.Token
+	if msg.Token != "" {
+		w.notifications.Store(key, n)
+	}
+	n.OnClick(func() {
+		n.Close()
+		w.notifications.Delete(key)
+		go func() {
+			state, err := w.Activate(id)
+			if err != nil {
+				WorkerError.Emit(w.window, err.Error())
+				return
+			}
+			w.mu.Lock()
+			if p := w.processes[id]; p != nil && msg.Token != "" {
+				if err := json.NewEncoder(p.input).Encode(map[string]string{"action": "click", "token": msg.Token}); err != nil {
+					WorkerError.Emit(w.window, "Gagal membuka percakapan dari notifikasi: "+err.Error())
+				}
+			}
+			w.mu.Unlock()
+			w.window.Show()
+			w.window.Restore()
+			w.window.Focus()
+			WorkspaceChanged.Emit(w.window, state)
+		}()
+	})
+	if err := n.Show(); err != nil {
+		w.notifications.Delete(key)
+		return err
+	}
+	return nil
+}

@@ -1,0 +1,55 @@
+package workspace
+
+import "github.com/egoist/mygo"
+
+func Run() error {
+	workspace, err := openWorkspace()
+	if err != nil {
+		return err
+	}
+	mygo.Bind(workspace)
+	mygo.App.WhenReady(func() {
+		win := mygo.NewWindow(mygo.WindowOptions{
+			Title: "WhatsApp Workspace", Width: 1280, Height: 860,
+			MinWidth: 720, MinHeight: 540, StateKey: "workspace",
+			BackgroundColor: "#10191d", URL: "/", Hidden: true,
+			TitleBarStyle: mygo.TitleBarHidden, HideWindowButtons: true,
+		})
+		workspace.window = win
+		// MyGo restores partially visible windows too. Fit before Show so an
+		// oversized/restored window cannot leave its caption controls off-screen.
+		if !win.IsMaximized() && !win.IsFullScreen() {
+			bounds := win.Bounds()
+			area := mygo.Screen.DisplayMatching(bounds).WorkArea
+			if area.Width > 0 && area.Height > 0 {
+				win.SetMinimumSize(min(720, area.Width), min(540, area.Height))
+				win.SetBounds(fitWorkArea(bounds, area))
+			}
+		}
+		workspace.window.OnClose(func(e *mygo.CloseEvent) {
+			if workspace.closing.Load() {
+				return
+			}
+			// Worker shutdown must not block the UI message loop.
+			e.PreventDefault()
+			go func() { workspace.close(); mygo.App.Quit() }()
+		})
+		go func() {
+			workspace.mu.Lock()
+			defer workspace.mu.Unlock()
+			if err := workspace.cleanupDeleted(); err != nil {
+				WorkerError.Emit(workspace.window, "Pembersihan data profil masih tertunda: "+err.Error())
+			}
+		}()
+		win.Show()
+	})
+	return mygo.App.Run()
+}
+
+func fitWorkArea(bounds, area mygo.Rectangle) mygo.Rectangle {
+	bounds.Width = min(bounds.Width, area.Width)
+	bounds.Height = min(bounds.Height, area.Height)
+	bounds.X = max(area.X, min(bounds.X, area.X+area.Width-bounds.Width))
+	bounds.Y = max(area.Y, min(bounds.Y, area.Y+area.Height-bounds.Height))
+	return bounds
+}
