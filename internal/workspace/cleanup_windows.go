@@ -67,14 +67,22 @@ func fileBusy(err error) bool {
 
 func stopOrphanBrowser(dataDir string) error {
 	const script = `$ErrorActionPreference = 'Stop'
-Get-CimInstance Win32_Process -Filter "Name = 'msedgewebview2.exe'" | ForEach-Object {
-  $match = [regex]::Match($_.CommandLine, '(?:^|\s)--user-data-dir=(?:"([^"]+)"|(\S+))')
-  if ($match.Success) {
-    $path = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
-    if ([string]::Equals($path.TrimEnd('\'), $env:WHATSAPP_PROFILE_CLEANUP.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) {
-      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-  }
+$processes = @(Get-CimInstance Win32_Process)
+$profile = Split-Path -Leaf (Split-Path -Parent $env:WHATSAPP_PROFILE_CLEANUP)
+$hostPattern = '(?:^|\s)--profile\s+"?' + [regex]::Escape($profile) + '"?(?:\s|$)'
+if ($processes | Where-Object { $_.CommandLine -match $hostPattern }) {
+  throw 'Profil masih digunakan oleh proses lain'
+}
+foreach ($process in $processes) {
+  if ($process.Name -ine 'msedgewebview2.exe' -or $process.CommandLine -match '(?:^|\s)--type=') { continue }
+  $match = [regex]::Match($process.CommandLine, '(?:^|\s)(?:"--user-data-dir=([^"]+)"|--user-data-dir=(?:"([^"]+)"|(\S+)))')
+  if (!$match.Success) { continue }
+  $path = if ($match.Groups[1].Success) { $match.Groups[1].Value } elseif ($match.Groups[2].Success) { $match.Groups[2].Value } else { $match.Groups[3].Value }
+  $root = $env:WHATSAPP_PROFILE_CLEANUP.TrimEnd('\')
+  if (![string]::Equals($path.TrimEnd('\'), $root, [StringComparison]::OrdinalIgnoreCase) -and
+      ![string]::Equals($path.TrimEnd('\'), ($root + '\EBWebView'), [StringComparison]::OrdinalIgnoreCase)) { continue }
+  if ($processes | Where-Object { $_.ProcessId -eq $process.ParentProcessId }) { continue }
+  Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
 }`
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

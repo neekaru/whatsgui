@@ -342,7 +342,7 @@ func (w *Workspace) ClearCache() error {
 	}
 	// WebView2 maps its cache files, so they are cleared with the worker down.
 	w.stop(id)
-	err := clearCache(profileDirectory(profileName(id)))
+	err := clearProfileCache(profileDirectory(profileName(id)))
 	if startErr := w.start(id); startErr != nil {
 		return errors.Join(err, startErr)
 	}

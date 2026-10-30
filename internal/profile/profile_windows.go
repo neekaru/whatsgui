@@ -25,8 +25,11 @@ var notificationScript string
 //go:embed media.js
 var mediaScript string
 
+//go:embed status_background.js
+var statusBackgroundScript string
+
 // preloadScript runs in every WhatsApp page: the main window and call popups.
-var preloadScript = notificationScript + "\n" + mediaScript
+var preloadScript = notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript
 
 type worker struct {
 	conn *connection
@@ -106,7 +109,7 @@ func (w *worker) open(cancel context.CancelFunc) {
 func (w *worker) configurePage(page *mygo.Page) {
 	page.SetPermissionHandler(requestPermission)
 	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
-		if isWhatsApp(e.URL) {
+		if isWhatsApp(e.URL) || (w.page != nil && page != w.page && isAppNavigation(e.URL)) {
 			return
 		}
 		e.PreventDefault()
@@ -115,7 +118,7 @@ func (w *worker) configurePage(page *mygo.Page) {
 		}
 	})
 	page.SetWindowOpenHandler(func(req mygo.WindowOpenRequest) *mygo.WindowOptions {
-		if isWhatsApp(req.URL) {
+		if isAppNavigation(req.URL) {
 			// MyGo adopts the popup into the worker's WebView2 environment,
 			// preserving its session and window.opener. Calls run in such a
 			// popup, so it needs the same preload and origin policy.
@@ -285,9 +288,24 @@ func (w *worker) openExternal(raw string) {
 	}
 }
 
+// Keep the tab on WhatsApp; auxiliary origins are allowed in popups and frames.
 func isWhatsApp(raw string) bool {
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && u.Host == "web.whatsapp.com" && u.User == nil
+	return err == nil && u.Scheme == "https" && u.User == nil &&
+		(u.Port() == "" || u.Port() == "443") && strings.EqualFold(u.Hostname(), "web.whatsapp.com")
+}
+
+func isAppNavigation(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "web.whatsapp.com", "webtp.whatsapp.net", "flows.whatsapp.net":
+		return true
+	default:
+		return false
+	}
 }
 
 func requestPermission(req mygo.PermissionRequest) bool {

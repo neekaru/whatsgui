@@ -27,18 +27,29 @@ func TestProfileProtocolAndOrigins(t *testing.T) {
 		}
 	}
 	for raw, allowed := range map[string]bool{
-		"https://web.whatsapp.com/":                true,
-		"https://web.whatsapp.com/?app=desktop":    true,
-		"https://web.whatsapp.com/call/popout":     true,
-		"https://web.whatsapp.com/call/popout?x=1": true,
-		"https://web.whatsapp.com.attacker.test/":  false,
-		"https://web.whatsapp.com@attacker.test/":  false,
-		"http://web.whatsapp.com/":                 false,
-		"javascript:alert(1)":                      false,
+		"https://web.whatsapp.com/":                           true,
+		"https://web.whatsapp.com/?app=desktop":               true,
+		"https://web.whatsapp.com/call/popout":                true,
+		"https://web.whatsapp.com/call/popout?x=1":            true,
+		"https://webtp.whatsapp.net/pdf-viewer/?locale=id_ID": true,
+		"https://flows.whatsapp.net/flows/cache_management/":  true,
+		"https://WEB.WHATSAPP.COM:443/":                       true,
+		"https://webtp.whatsapp.net:443/pdf-viewer/":          true,
+		"https://webtp.whatsapp.net:444/pdf-viewer/":          false,
+		"https://webtp.whatsapp.net.evil.test/pdf-viewer/":    false,
+		"https://user@webtp.whatsapp.net/pdf-viewer/":         false,
+		"http://webtp.whatsapp.net/pdf-viewer/":               false,
+		"https://web.whatsapp.com.attacker.test/":             false,
+		"https://web.whatsapp.com@attacker.test/":             false,
+		"http://web.whatsapp.com/":                            false,
+		"javascript:alert(1)":                                 false,
 	} {
-		if got := isWhatsApp(raw); got != allowed {
+		if got := isAppNavigation(raw); got != allowed {
 			t.Fatalf("origin %q = %v, ingin %v", raw, got, allowed)
 		}
+	}
+	if isWhatsApp("https://webtp.whatsapp.net/pdf-viewer/") || !isWhatsApp("https://WEB.WHATSAPP.COM:443/") {
+		t.Fatal("main tab navigation does not preserve the primary WhatsApp origin")
 	}
 }
 
@@ -55,6 +66,10 @@ func TestMediaPermissionsAreLimitedToWhatsApp(t *testing.T) {
 		request.Origin = "https://example.com"
 		if requestPermission(request) {
 			t.Fatalf("media permissions granted to a different origin: %v", permissions)
+		}
+		request.Origin = "https://webtp.whatsapp.net"
+		if requestPermission(request) {
+			t.Fatalf("media permissions granted to auxiliary PDF viewer: %v", permissions)
 		}
 		request.Origin = whatsappOrigin
 		request.Permissions = append(append([]mygo.Permission(nil), permissions...), mygo.PermissionGeolocation)
