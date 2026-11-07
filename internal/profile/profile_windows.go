@@ -21,6 +21,9 @@ import (
 
 const whatsappOrigin = "https://web.whatsapp.com"
 
+//go:embed passive_events.js
+var passiveEventsScript string
+
 //go:embed appearance.js
 var appearanceScript string
 
@@ -37,9 +40,8 @@ var statusBackgroundScript string
 var unreadScript string
 
 // preloadScript runs in every WhatsApp page: the main window and call popups.
-// appearanceScript comes first: WhatsApp's bootloader reads its theme from
-// localStorage before any later script runs.
-var preloadScript = appearanceScript + "\n" + notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
+// Appearance is seeded with the workspace selection before WhatsApp boots.
+var preloadScript = passiveEventsScript + "\n" + appearanceScript + "\n" + notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
 
 type worker struct {
 	conn      *connection
@@ -104,7 +106,7 @@ func (w *worker) open(cancel context.CancelFunc) {
 		Hidden: true, Frameless: true, SkipTaskbar: true,
 		BackgroundColor: "#111b21",
 		Page: mygo.PageOptions{
-			PreloadScript:  preloadScript,
+			PreloadScript:  w.preload(),
 			TrustedOrigins: []string{whatsappOrigin},
 			// The workspace offers the inspector to users of release builds.
 			DevTools: mygo.DevToolsEnabled,
@@ -149,7 +151,7 @@ func (w *worker) configurePage(page *mygo.Page) {
 			return &mygo.WindowOptions{
 				Title: "WhatsApp", Width: req.Width, Height: req.Height,
 				Page: mygo.PageOptions{
-					PreloadScript:  preloadScript,
+					PreloadScript:  w.preload(),
 					TrustedOrigins: []string{whatsappOrigin},
 				},
 			}
@@ -220,24 +222,34 @@ func (w *worker) readCommands() {
 		}
 	}
 }
+
+func (w *worker) preload() string {
+	w.themeMu.Lock()
+	theme := w.theme
+	w.themeMu.Unlock()
+	if theme == "" {
+		theme = ThemeSystem
+	}
+	value, _ := json.Marshal(theme)
+	return "window.__workspaceAppearance = {theme: " + string(value) + "};\n" + preloadScript
+}
+
 func (w *worker) applyTheme() {
 	w.themeMu.Lock()
-	defer w.themeMu.Unlock()
-	if w.theme == "" {
+	value := w.theme
+	w.themeMu.Unlock()
+	if value == "" {
 		return
 	}
-	theme, _ := json.Marshal(w.theme)
+	theme, _ := json.Marshal(value)
 	ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
 	defer cancel()
-	changed, err := w.page.EvalContext(ctx, "window.__workspaceApplyAppearance?.({theme: "+string(theme)+"})")
+	_, err := w.page.EvalContext(ctx, "window.__workspaceApplyAppearance?.({theme: "+string(theme)+"})")
 	if err != nil {
 		if w.ctx.Err() == nil {
 			w.report(fmt.Errorf("menerapkan tema WhatsApp: %w", err))
 		}
 		return
-	}
-	if changed == true {
-		w.page.Reload()
 	}
 }
 

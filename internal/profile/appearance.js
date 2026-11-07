@@ -2,23 +2,90 @@
   if (location.origin !== 'https://web.whatsapp.com') return;
   const config = window.__workspaceAppearance || { theme: 'system', privacyBlur: false };
 
-  // WhatsApp keeps its theme in localStorage, where its own Settings → Theme
-  // writes it, and its bootloader reads it before any page script runs: this
-  // preload therefore has to write it first. "system" follows Windows through
-  // prefers-color-scheme, which is what system-theme-mode asks for.
-  const syncTheme = (theme) => {
-    const wanted = theme === 'dark' ? '"dark"' : theme === 'light' ? '"light"' : null;
-    const state = () => `${localStorage.getItem('theme')}|${localStorage.getItem('system-theme-mode')}`;
-    const before = state();
-    if (wanted === null) {
-      localStorage.removeItem('theme');
-      localStorage.setItem('system-theme-mode', 'true');
-    } else {
-      localStorage.setItem('theme', wanted);
-      localStorage.removeItem('system-theme-mode');
+  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
+  let themeContext;
+  let themeObserver;
+  let themeTimer;
+  let searchTimer;
+
+  // ThemeContext updates React, loads theme assets and persists WA preferences.
+  // Writing storage alone leaves the already-rendered UI on its old theme.
+  const findThemeContext = () => {
+    const checked = new Set();
+    for (const element of document.querySelectorAll('*')) {
+      const key = Object.keys(element).find(key =>
+        ['__reactFiber$', '__reactInternalInstance$', '__reactContainer$'].some(prefix => key.startsWith(prefix)));
+      for (let fiber = key && element[key]; fiber && !checked.has(fiber); fiber = fiber.return) {
+        checked.add(fiber);
+        const value = (fiber.memoizedProps || fiber.pendingProps)?.value;
+        if (typeof value?.setTheme === 'function' && typeof value?.setSystemThemeMode === 'function') {
+          return value;
+        }
+      }
     }
-    return before !== state();
   };
+
+  const stopThemeSearch = () => {
+    themeObserver?.disconnect();
+    themeObserver = null;
+    clearTimeout(themeTimer);
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  };
+
+  const syncTheme = () => {
+    const wanted = config.theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : config.theme;
+    themeContext ||= findThemeContext();
+    if (!themeContext || typeof window.require !== 'function') return false;
+    let prefs;
+    let reactDOM;
+    try {
+      prefs = window.require('WAWebUserPrefsGeneral');
+      reactDOM = window.require('ReactDOM');
+    } catch (_) {
+      return false; // The module may not be registered until WhatsApp finishes booting.
+    }
+    if (typeof prefs?.getTheme !== 'function' || typeof prefs?.getSystemThemeMode !== 'function' ||
+        typeof reactDOM?.flushSync !== 'function') {
+      throw new Error('WhatsApp theme API is unavailable');
+    }
+    // Commit each selection before another can hit WA's state-based early return.
+    reactDOM.flushSync(() => {
+      // Resolve system mode ourselves, as ZapZap does, so OS changes update React too.
+      if (prefs.getSystemThemeMode() || themeContext.systemThemeMode) themeContext.setSystemThemeMode(false);
+      if (prefs.getTheme() !== wanted || themeContext.theme !== wanted) themeContext.setTheme(wanted);
+    });
+    stopThemeSearch();
+    return true;
+  };
+
+  const applyTheme = () => {
+    try {
+      if (syncTheme() || themeObserver || !document.documentElement) return;
+      themeObserver = new MutationObserver(() => {
+        if (searchTimer) return;
+        // Timers also run in background profiles, unlike animation frames.
+        searchTimer = setTimeout(() => {
+          searchTimer = null;
+          applyTheme();
+        }, 100);
+      });
+      themeObserver.observe(document.documentElement, { childList: true, subtree: true });
+      // Call popups may never mount ThemeContext; stop scanning without an error.
+      themeTimer = setTimeout(stopThemeSearch, 60000);
+    } catch (error) {
+      stopThemeSearch();
+      console.error('[Workspace theme]', error);
+    }
+  };
+
+  // Seed the bootloader before React is ready; later changes use ThemeContext.
+  const initialTheme = config.theme === 'system' ? (systemTheme.matches ? 'dark' : 'light') : config.theme;
+  localStorage.setItem('theme', JSON.stringify(initialTheme));
+  localStorage.setItem('system-theme-mode', 'false');
+  systemTheme.addEventListener('change', () => {
+    if (config.theme === 'system') applyTheme();
+  });
 
   const STYLE_ID = '__workspace_privacy_blur';
   // #pane-side holds the chat list with names and message previews, #main's
@@ -54,11 +121,8 @@ html.__workspace-blur-fallback #app:hover { filter: none; }`;
 
   const apply = (next) => {
     Object.assign(config, next || {});
-    const changed = syncTheme(config.theme);
+    applyTheme();
     applyBlur(config.privacyBlur);
-    // At document start WhatsApp has not read its theme yet, so a change there
-    // needs no reload; a change on a page it already rendered does.
-    return changed && document.readyState !== 'loading';
   };
 
   // 'pending' means there is no signed-in UI yet, so nothing is exposed.
@@ -79,6 +143,7 @@ html.__workspace-blur-fallback #app:hover { filter: none; }`;
 
   const start = () => {
     applyBlur(config.privacyBlur);
+    applyTheme();
     // WhatsApp rewrites <html>'s class as it switches its own theme; keep ours.
     new MutationObserver(() => {
       if (config.privacyBlur && !document.documentElement.classList.contains('__workspace-blur')) {

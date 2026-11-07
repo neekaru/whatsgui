@@ -35,9 +35,6 @@ func Run() error {
 			e.PreventDefault()
 			workspace.hideWindow()
 		})
-		// Minimizing means the tray: the window is hidden, and the tray icon
-		// brings it back.
-		win.OnMinimize(func() { workspace.hideWindow() })
 		go func() {
 			workspace.mu.Lock()
 			defer workspace.mu.Unlock()

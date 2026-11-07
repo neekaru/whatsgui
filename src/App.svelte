@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
+  import { on } from "svelte/events";
   import { currentWindow } from "mygo-runtime";
   import { Workspace, events, type State, type MediaSettings } from "./mygo";
   import NotificationSettings from "./NotificationSettings.svelte";
@@ -272,6 +273,12 @@
     e.preventDefault();
   }
 
+  // Wheel must stay cancellable so vertical wheel scrolls the strip; svelte's
+  // declarative onwheel leaves passive unspecified, register it explicitly.
+  function tabsWheel(node: HTMLElement) {
+    return { destroy: on(node, "wheel", onTabsWheel, { passive: false }) };
+  }
+
   function onTabKey(e: KeyboardEvent, index: number) {
     const count = model.tabs.length;
     let next = -1;
@@ -336,7 +343,7 @@
 <div class="app">
   <!-- Titlebar Tabs and Window Captions -->
   <header class="titlebar">
-    <div class="tabs" role="tablist" aria-label="Profil WhatsApp" bind:this={tablist} onwheel={onTabsWheel}>
+    <div class="tabs" role="tablist" aria-label="Profil WhatsApp" bind:this={tablist} use:tabsWheel>
       {#each model.tabs as tab, index (tab.id)}
         <button
           type="button"
