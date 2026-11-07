@@ -48,6 +48,7 @@ type Command struct {
 	Token   string `json:"token"`
 	AudioID string `json:"audioId"`
 	VideoID string `json:"videoId"`
+	Theme   string `json:"theme"`
 	Dir     string `json:"dir"`
 }
 
@@ -86,6 +87,10 @@ func (c *connection) receive() (Command, error) {
 	case "setmedia":
 		if len(cmd.AudioID) > 256 || len(cmd.VideoID) > 256 {
 			return cmd, errors.New("ID perangkat terlalu panjang")
+		}
+	case "theme":
+		if cmd.Theme != ThemeSystem && cmd.Theme != ThemeLight && cmd.Theme != ThemeDark {
+			return cmd, errors.New("tema tidak valid")
 		}
 	case "setdownloaddir":
 		if len(cmd.Dir) > 1024 || strings.ContainsRune(cmd.Dir, 0) {

@@ -175,6 +175,10 @@ export const Workspace = {
   setMediaDevices(audioID: string, videoID: string): Promise<void> {
     return call("Workspace.SetMediaDevices", audioID, videoID);
   },
+  /** SetTheme applies the workspace theme to all WhatsApp profiles. */
+  setTheme(theme: string): Promise<void> {
+    return call("Workspace.SetTheme", theme);
+  },
   /** ShowDownload shows a download in Explorer, selected in its folder. */
   showDownload(id: string): Promise<void> {
     return call("Workspace.ShowDownload", id);

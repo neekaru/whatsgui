@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -45,6 +46,8 @@ type worker struct {
 	page      *mygo.Page
 	ctx       context.Context
 	downloads *downloadManager
+	themeMu   sync.Mutex
+	theme     string
 }
 
 // mediaList is what the injected script enumerates: microphones and cameras.
@@ -73,7 +76,7 @@ func Run(name string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer os.Stdin.Close()
-	w := &worker{conn: conn, ctx: ctx}
+	w := &worker{conn: conn, ctx: ctx, theme: start.Theme}
 	// MyGo v0.6.4 has one environment per process, keyed by application name.
 	mygo.App.SetName(name)
 	// Downloads are the profile's own: its list is saved next to its data.
@@ -109,6 +112,7 @@ func (w *worker) open(cancel context.CancelFunc) {
 	})
 	win.OnClosed(cancel)
 	w.page = win.Page()
+	w.page.OnDidFinishLoad(func() { go w.applyTheme() })
 	w.page.OnDidFailLoad(func(err *mygo.LoadError) {
 		w.report(fmt.Errorf("WhatsApp gagal dimuat: %v", err))
 	})
@@ -168,6 +172,11 @@ func (w *worker) readCommands() {
 		switch cmd.Action {
 		case "reload":
 			w.page.Reload()
+		case "theme":
+			w.themeMu.Lock()
+			w.theme = cmd.Theme
+			w.themeMu.Unlock()
+			w.applyTheme()
 		case "click":
 			token, err := json.Marshal(cmd.Token)
 			if err != nil {
@@ -209,6 +218,26 @@ func (w *worker) readCommands() {
 			w.report(errors.New("profil sudah dimulai"))
 			return
 		}
+	}
+}
+func (w *worker) applyTheme() {
+	w.themeMu.Lock()
+	defer w.themeMu.Unlock()
+	if w.theme == "" {
+		return
+	}
+	theme, _ := json.Marshal(w.theme)
+	ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
+	defer cancel()
+	changed, err := w.page.EvalContext(ctx, "window.__workspaceApplyAppearance?.({theme: "+string(theme)+"})")
+	if err != nil {
+		if w.ctx.Err() == nil {
+			w.report(fmt.Errorf("menerapkan tema WhatsApp: %w", err))
+		}
+		return
+	}
+	if changed == true {
+		w.page.Reload()
 	}
 }
 

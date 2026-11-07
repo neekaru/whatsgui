@@ -87,6 +87,7 @@ type Workspace struct {
 	mu            sync.Mutex
 	data          State
 	file          string
+	theme         string
 	window        *mygo.Window
 	processes     map[string]*profileProcess
 	bounds        Bounds
@@ -223,6 +224,23 @@ func (w *Workspace) State() (State, error) {
 	}
 	w.place()
 	return w.snapshot(), nil
+}
+
+// SetTheme applies the workspace theme to all WhatsApp profiles.
+func (w *Workspace) SetTheme(theme string) error {
+	if theme != profile.ThemeSystem && theme != profile.ThemeLight && theme != profile.ThemeDark {
+		return errors.New("tema tidak valid")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.theme = theme
+	var errs []error
+	for _, p := range w.processes {
+		if err := w.sendCommand(p, profile.Command{Action: "theme", Theme: theme}); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (w *Workspace) Create(name string) (State, error) {
@@ -551,7 +569,7 @@ func (w *Workspace) start(id string) error {
 		return fmt.Errorf("mengisolasi proses profil: %w", err)
 	}
 	p.job = job
-	if err := w.send(p, "start"); err != nil {
+	if err := w.sendCommand(p, profile.Command{Action: "start", Theme: w.theme}); err != nil {
 		job.Close()
 		input.Close()
 		cmd.Wait()

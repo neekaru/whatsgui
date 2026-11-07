@@ -87,7 +87,6 @@ html.__workspace-blur-fallback #app:hover { filter: none; }`;
     }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
   };
 
-  apply(config);
   if (document.documentElement) start();
   else document.addEventListener('DOMContentLoaded', start, { once: true });
 })();
