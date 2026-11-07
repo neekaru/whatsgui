@@ -26,7 +26,13 @@ type Message struct {
 	Video   []MediaDevice `json:"video,omitempty"`
 	AudioID string        `json:"audioId,omitempty"`
 	VideoID string        `json:"videoId,omitempty"`
+	Count   int           `json:"count,omitempty"`
 	Err     string        `json:"err,omitempty"`
+	// Dir is the folder this profile saves downloads to.
+	Dir string `json:"dir,omitempty"`
+	// Download is one changed download; Downloads is the saved list.
+	Download  *DownloadItem  `json:"download,omitempty"`
+	Downloads []DownloadItem `json:"downloads,omitempty"`
 }
 
 // MediaDevice is a microphone or camera the profile's WebView2 reports.
@@ -42,6 +48,7 @@ type Command struct {
 	Token   string `json:"token"`
 	AudioID string `json:"audioId"`
 	VideoID string `json:"videoId"`
+	Dir     string `json:"dir"`
 }
 
 // One reader owns stdin; the encoder is shared by page callbacks and bound methods.
@@ -80,6 +87,10 @@ func (c *connection) receive() (Command, error) {
 		if len(cmd.AudioID) > 256 || len(cmd.VideoID) > 256 {
 			return cmd, errors.New("ID perangkat terlalu panjang")
 		}
+	case "setdownloaddir":
+		if len(cmd.Dir) > 1024 || strings.ContainsRune(cmd.Dir, 0) {
+			return cmd, errors.New("folder unduhan tidak valid")
+		}
 	default:
 		return cmd, fmt.Errorf("perintah profil tidak dikenal: %q", cmd.Action)
 	}
@@ -112,4 +123,12 @@ func (b *ProfileBridge) Dismiss(token string) error {
 		return errors.New("token notifikasi tidak valid")
 	}
 	return b.conn.send(Message{Kind: "dismiss", Token: token})
+}
+
+// SetUnread reports the unread chats WhatsApp itself counts in the page title.
+func (b *ProfileBridge) SetUnread(count int) error {
+	if count < 0 || count > 9999 {
+		return errors.New("jumlah pesan belum dibaca tidak valid")
+	}
+	return b.conn.send(Message{Kind: "unread", Count: count})
 }

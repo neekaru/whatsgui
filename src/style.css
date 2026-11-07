@@ -96,7 +96,7 @@ body {
   height: 100%;
 }
 
-:where(button, input, [tabindex]):focus-visible {
+:where(button, input, select, [tabindex]):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -391,6 +391,90 @@ body {
 .settings-heading h2 {
   margin: 0;
   font-size: 14px;
+}
+
+.settings-section {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-section h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-section p {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+}
+
+.settings-section .settings-error {
+  color: var(--danger);
+}
+
+.setting-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.setting input[type="time"] {
+  width: 100%;
+  height: var(--control);
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--fg);
+  background: var(--panel-2);
+  font: inherit;
+}
+
+.download-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.download-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.download-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.download-details strong,
+.download-details span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.download-details span {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.tab-count {
+  display: inline-block;
+  min-width: 17px;
+  margin-left: 6px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--panel);
+  font-size: 10px;
+  text-align: center;
 }
 
 .settings-grid {

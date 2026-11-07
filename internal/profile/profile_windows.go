@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -18,6 +19,9 @@ import (
 )
 
 const whatsappOrigin = "https://web.whatsapp.com"
+
+//go:embed appearance.js
+var appearanceScript string
 
 //go:embed notification.js
 var notificationScript string
@@ -28,13 +32,19 @@ var mediaScript string
 //go:embed status_background.js
 var statusBackgroundScript string
 
+//go:embed unread.js
+var unreadScript string
+
 // preloadScript runs in every WhatsApp page: the main window and call popups.
-var preloadScript = notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript
+// appearanceScript comes first: WhatsApp's bootloader reads its theme from
+// localStorage before any later script runs.
+var preloadScript = appearanceScript + "\n" + notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
 
 type worker struct {
-	conn *connection
-	page *mygo.Page
-	ctx  context.Context
+	conn      *connection
+	page      *mygo.Page
+	ctx       context.Context
+	downloads *downloadManager
 }
 
 // mediaList is what the injected script enumerates: microphones and cameras.
@@ -66,6 +76,13 @@ func Run(name string) error {
 	w := &worker{conn: conn, ctx: ctx}
 	// MyGo v0.6.4 has one environment per process, keyed by application name.
 	mygo.App.SetName(name)
+	// Downloads are the profile's own: its list is saved next to its data.
+	dataDir, _ := mygo.App.Path(mygo.PathUserData)
+	store := ""
+	if dataDir != "" {
+		store = filepath.Join(dataDir, "downloads.json")
+	}
+	w.downloads = newDownloadManager(conn.send, store)
 	// Windows creates one WebView2 environment per process, from the app's
 	// first language, when the first window is made: this has to run before,
 	// and changing it later needs a new worker. The user's languages follow
@@ -100,6 +117,7 @@ func (w *worker) open(cancel context.CancelFunc) {
 		mygo.App.Quit()
 		return
 	}
+	w.downloads.announce()
 	if err := w.page.LoadURL(whatsappOrigin + "/"); err != nil {
 		w.report(err)
 	}
@@ -108,6 +126,8 @@ func (w *worker) open(cancel context.CancelFunc) {
 
 func (w *worker) configurePage(page *mygo.Page) {
 	page.SetPermissionHandler(requestPermission)
+	// The main page and call popups share this download policy.
+	w.downloads.track(page)
 	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
 		if isWhatsApp(e.URL) || (w.page != nil && page != w.page && isAppNavigation(e.URL)) {
 			return
@@ -166,6 +186,15 @@ func (w *worker) readCommands() {
 			go w.answerMedia(cmd)
 		case "setmedia":
 			go w.answerSetMedia(cmd)
+		case "setdownloaddir":
+			// The folder is this profile's own; the workspace only chose it.
+			msg := Message{Kind: "downloads", ID: cmd.ID}
+			if err := w.downloads.setDir(cmd.Dir); err != nil {
+				msg.Err = err.Error()
+			} else {
+				msg.Dir = w.downloads.downloadDir()
+			}
+			w.reply(msg)
 		case "quit":
 			return
 		case "devtools":

@@ -30,10 +30,14 @@ func Run() error {
 			if workspace.closing.Load() {
 				return
 			}
-			// Worker shutdown must not block the UI message loop.
+			// Closing the window keeps the app running in the tray, so the
+			// profiles keep counting messages; Quit in the tray menu leaves.
 			e.PreventDefault()
-			go func() { workspace.close(); mygo.App.Quit() }()
+			workspace.hideWindow()
 		})
+		// Minimizing means the tray: the window is hidden, and the tray icon
+		// brings it back.
+		win.OnMinimize(func() { workspace.hideWindow() })
 		go func() {
 			workspace.mu.Lock()
 			defer workspace.mu.Unlock()
@@ -42,6 +46,7 @@ func Run() error {
 			}
 		}()
 		win.Show()
+		workspace.setupTray()
 	})
 	return mygo.App.Run()
 }

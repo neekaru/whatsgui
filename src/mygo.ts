@@ -12,6 +12,36 @@ export interface Bounds {
   scale: number;
 }
 
+/**
+ * DNDSettings is the user's Do Not Disturb choice: a manual switch and an
+ * optional daily window in local time, which may cross midnight.
+ */
+export interface DNDSettings {
+  enabled: boolean;
+  scheduleEnabled: boolean;
+  start: string;
+  end: string;
+}
+
+/** DownloadItem is a file a profile downloaded, as the UI lists it. */
+export interface DownloadItem {
+  id: string;
+  profileId: string;
+  profileName: string;
+  name: string;
+  path: string;
+  state: string;
+  /** Received is how many bytes the profile wrote so far. */
+  received: number;
+  /**
+   * Total is the size of the file when known; 0 means the download reports
+   * no total, so the UI must not show a percentage.
+   */
+  total: number;
+  error?: string;
+  startedAt: number;
+}
+
 /** MediaDevice is a microphone or camera of the profile. */
 export interface MediaDevice {
   id: string;
@@ -37,6 +67,12 @@ export interface State {
 export interface Tab {
   id: string;
   name: string;
+  /**
+   * Unread is WhatsApp's aggregate of the chats with unread messages, as
+   * its page title reports them. It is runtime state: loading tabs.json
+   * clears it, so a count from the last run never shows.
+   */
+  unread: number;
 }
 
 // ---- Services ----
@@ -44,6 +80,14 @@ export interface Tab {
 export const Workspace = {
   activate(id: string): Promise<State> {
     return call("Workspace.Activate", id);
+  },
+  /**
+   * ChooseDownloadDirectory asks where the active profile saves downloads and
+   * returns the chosen folder, or "" when the user cancels. The choice is
+   * stored in the profile, so every later download uses it.
+   */
+  chooseDownloadDirectory(): Promise<string> {
+    return call("Workspace.ChooseDownloadDirectory");
   },
   /**
    * ClearCache clears the downloaded web content of the active profile only.
@@ -54,6 +98,28 @@ export const Workspace = {
   },
   create(name: string): Promise<State> {
     return call("Workspace.Create", name);
+  },
+  /**
+   * DNDActive reports whether popups are suppressed now, by the manual switch or
+   * by the schedule.
+   */
+  dndActive(): Promise<boolean> {
+    return call("Workspace.DNDActive");
+  },
+  /**
+   * DownloadDirectory is the folder the active profile saves downloads to, or
+   * "" while the profile has not reported it yet.
+   */
+  downloadDirectory(): Promise<string> {
+    return call("Workspace.DownloadDirectory");
+  },
+  /** Downloads lists the downloads of every profile, newest first. */
+  downloads(): Promise<DownloadItem[]> {
+    return call("Workspace.Downloads");
+  },
+  /** GetDND returns the saved Do Not Disturb settings. */
+  getDND(): Promise<DNDSettings> {
+    return call("Workspace.GetDND");
   },
   /**
    * MediaDevices lists the microphones and cameras of the active profile and the
@@ -70,6 +136,18 @@ export const Workspace = {
   openDevTools(): Promise<void> {
     return call("Workspace.OpenDevTools");
   },
+  /**
+   * OpenDownload opens a finished download with the default application of its
+   * file type. The path comes from the profile that downloaded it, never from
+   * the page.
+   */
+  openDownload(id: string): Promise<void> {
+    return call("Workspace.OpenDownload", id);
+  },
+  /** Quit shuts the profiles down and leaves the app, whatever the window shows. */
+  quit(): Promise<void> {
+    return call("Workspace.Quit");
+  },
   reload(): Promise<void> {
     return call("Workspace.Reload");
   },
@@ -83,12 +161,23 @@ export const Workspace = {
     return call("Workspace.Resize", bounds);
   },
   /**
+   * SetDND saves the Do Not Disturb settings. While they are active, popups and
+   * their sound are dropped; the unread counts keep updating.
+   */
+  setDND(settings: DNDSettings): Promise<void> {
+    return call("Workspace.SetDND", settings);
+  },
+  /**
    * SetMediaDevices chooses the microphone and camera of the active profile.
    * Empty IDs mean the system default. The choice is stored in the profile, so
    * every call it makes, popups included, uses it.
    */
   setMediaDevices(audioID: string, videoID: string): Promise<void> {
     return call("Workspace.SetMediaDevices", audioID, videoID);
+  },
+  /** ShowDownload shows a download in Explorer, selected in its folder. */
+  showDownload(id: string): Promise<void> {
+    return call("Workspace.ShowDownload", id);
   },
   state(): Promise<State> {
     return call("Workspace.State");
@@ -99,6 +188,10 @@ export const Workspace = {
 
 /** Events sent by the Go side. Subscribe with `events.name.on(listener)`. */
 export const events = {
+  /** DNDChanged tells the UI that the settings, or the schedule's effect, changed. */
+  dndChanged: event<DNDSettings>("dndChanged"),
+  /** DownloadsChanged sends the downloads of every profile after any change. */
+  downloadsChanged: event<DownloadItem[]>("downloadsChanged"),
   workspaceChanged: event<State>("workspaceChanged"),
   workerError: event<string>("workerError"),
 } as const;

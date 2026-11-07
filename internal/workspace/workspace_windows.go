@@ -28,6 +28,10 @@ import (
 type Tab struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Unread is WhatsApp's aggregate of the chats with unread messages, as
+	// its page title reports them. It is runtime state: loading tabs.json
+	// clears it, so a count from the last run never shows.
+	Unread int `json:"unread"`
 }
 
 type State struct {
@@ -87,8 +91,15 @@ type Workspace struct {
 	processes     map[string]*profileProcess
 	bounds        Bounds
 	closing       atomic.Bool
+	quitOnce      sync.Once
+	tray          *trayState
 	notifications sync.Map
 	deletedIDs    []string
+	// dlMu guards the downloads of every profile, which the profile readers
+	// update without waiting for mu.
+	dlMu          sync.Mutex
+	downloadItems map[string]DownloadItem
+	downloadDirs  map[string]string
 }
 
 func openWorkspace() (*Workspace, error) {
@@ -96,7 +107,16 @@ func openWorkspace() (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &Workspace{file: filepath.Join(dir, "tabs.json"), processes: make(map[string]*profileProcess)}
+	w := &Workspace{
+		file:      filepath.Join(dir, "tabs.json"),
+		processes: make(map[string]*profileProcess),
+		tray:      newTrayState(filepath.Join(dir, "dnd.json")),
+	}
+	if err := w.loadDND(); err != nil {
+		// A broken dnd.json must not keep the app from starting: the defaults
+		// are used and the user is told.
+		w.tray.loadErr = err
+	}
 	data, err := os.ReadFile(w.file)
 	if errors.Is(err, os.ErrNotExist) {
 		w.data = State{Tabs: []Tab{newTab("WhatsApp 1")}}
@@ -111,6 +131,10 @@ func openWorkspace() (*Workspace, error) {
 		return nil, fmt.Errorf("tabs.json tidak valid: %w", err)
 	}
 	w.data, w.deletedIDs = stored.State, stored.DeletedIDs
+	// Counts are runtime state; a stored one is stale the moment the app quit.
+	for i := range w.data.Tabs {
+		w.data.Tabs[i].Unread = 0
+	}
 	seen := map[string]bool{}
 	for _, tab := range w.data.Tabs {
 		if !profile.ValidID(tab.ID) || seen[tab.ID] {
@@ -157,7 +181,13 @@ func (w *Workspace) save(state State) error {
 	if err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(filepath.Dir(w.file), "tabs-*.tmp")
+	return writeFileAtomic(w.file, data)
+}
+
+// writeFileAtomic replaces a settings file in one step: a crash mid-write
+// leaves the old file, never a truncated one.
+func writeFileAtomic(path string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+"-*.tmp")
 	if err != nil {
 		return err
 	}
@@ -173,7 +203,7 @@ func (w *Workspace) save(state State) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return os.Rename(file.Name(), w.file)
+	return os.Rename(file.Name(), path)
 }
 
 func (w *Workspace) snapshot() State {
@@ -268,6 +298,7 @@ func (w *Workspace) Remove(id string) (State, error) {
 		return State{}, errors.New("tab tidak ditemukan")
 	}
 	state := w.snapshot()
+	removed := state.Tabs[i].Unread
 	state.Tabs = append(state.Tabs[:i:i], state.Tabs[i+1:]...)
 	if state.ActiveID == id {
 		state.ActiveID = ""
@@ -284,6 +315,7 @@ func (w *Workspace) Remove(id string) (State, error) {
 		return State{}, err
 	}
 	w.data = state
+	w.addUnread(-removed)
 	w.stop(id)
 	w.notifications.Range(func(key, value any) bool {
 		if strings.HasPrefix(key.(string), id+"/") {
@@ -441,7 +473,7 @@ func (w *Workspace) activeProcess() (*profileProcess, error) {
 }
 
 // request sends a command and waits for the reply with its ID. The worker
-// answers media requests with Message.Err set when it fails.
+// answers with Message.Err set when it fails.
 func (w *Workspace) request(p *profileProcess, cmd profile.Command) (profile.Message, error) {
 	var id [8]byte
 	if _, err := rand.Read(id[:]); err != nil {
@@ -462,7 +494,7 @@ func (w *Workspace) request(p *profileProcess, cmd profile.Command) (profile.Mes
 	case <-p.done:
 		return profile.Message{}, errors.New("profil berhenti sebelum menjawab")
 	case <-time.After(20 * time.Second):
-		return profile.Message{}, errors.New("profil tidak menjawab permintaan perangkat")
+		return profile.Message{}, errors.New("profil tidak menjawab permintaan")
 	}
 }
 
@@ -546,6 +578,8 @@ func (w *Workspace) start(id string) error {
 						WorkerError.Emit(w.window, err.Error())
 					}
 				}(msg)
+			case "unread":
+				w.setUnread(id, msg.Count)
 			case "error":
 				WorkerError.Emit(w.window, msg.Body)
 			case "external":
@@ -561,6 +595,22 @@ func (w *Workspace) start(id string) error {
 					default:
 					}
 				}
+			case "download":
+				if msg.Download != nil {
+					w.mergeDownload(id, *msg.Download, msg.Dir)
+				}
+			case "downloads":
+				if msg.ID != "" {
+					// The reply to a folder change.
+					if ch, ok := p.replyTo(msg.ID); ok {
+						select {
+						case ch <- msg:
+						default:
+						}
+					}
+					continue
+				}
+				w.mergeDownloads(id, msg)
 			case "dismiss":
 				if n, ok := w.notifications.LoadAndDelete(id + "/" + msg.Token); ok {
 					n.(*mygo.Notification).Close()
@@ -570,6 +620,8 @@ func (w *Workspace) start(id string) error {
 		cmd.Wait()
 		close(p.done)
 		if !w.closing.Load() && !p.stopping.Load() {
+			// No page means no count: a stale number would outlive its tab.
+			w.setUnread(id, 0)
 			WorkerError.Emit(w.window, "Proses tab berhenti. Pilih tab atau Muat ulang untuk membukanya kembali.")
 		}
 	}()
@@ -652,6 +704,7 @@ func (w *Workspace) close() {
 	for id := range w.processes {
 		w.stop(id)
 	}
+	w.shutdownTray()
 }
 
 func (w *Workspace) notify(id string, msg profile.Message) error {
@@ -663,6 +716,11 @@ func (w *Workspace) notify(id string, msg profile.Message) error {
 	}
 	name := w.data.Tabs[i].Name
 	w.mu.Unlock()
+	// Do Not Disturb is the user's own choice: counts keep coming from the
+	// page, only the popup and its sound are dropped.
+	if w.DNDActive() {
+		return nil
+	}
 	if !mygo.NotificationsSupported() {
 		return errors.New("notifikasi sistem tidak tersedia")
 	}

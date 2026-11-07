@@ -2,6 +2,7 @@
   import { onMount, tick } from "svelte";
   import { currentWindow } from "mygo-runtime";
   import { Workspace, events, type State, type MediaSettings } from "./mygo";
+  import NotificationSettings from "./NotificationSettings.svelte";
 
   type Pending = "startup" | "create" | "rename" | "remove" | "activate" | "reload" | "cache" | "devices" | "devtools";
   type Form = "none" | "create" | "rename" | "delete";
@@ -335,6 +336,7 @@
           id={`tab-${tab.id}`}
           class="tab"
           title={tab.name}
+          aria-label={tab.unread > 0 ? `${tab.name}, ${tab.unread} belum dibaca` : tab.name}
           aria-selected={tab.id === model.activeId}
           aria-controls="profile-view"
           tabindex={tab.id === focusId ? 0 : -1}
@@ -342,6 +344,7 @@
           onkeydown={(e) => onTabKey(e, index)}
         >
           {tab.name}
+          {#if tab.unread > 0}<span class="tab-count" aria-hidden="true">{tab.unread > 99 ? "99+" : tab.unread}</span>{/if}
         </button>
       {/each}
     </div>
@@ -533,6 +536,7 @@
           Pembersihan cache memuat ulang profil dan mengakhiri panggilan; sesi tetap disimpan.
           Jika perangkat tersimpan tidak tersedia, pilih perangkat lain atau default sistem.{/if}
       </p>
+      <NotificationSettings />
     </section>
   {/if}
 
