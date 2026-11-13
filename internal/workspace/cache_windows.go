@@ -57,13 +57,13 @@ func clearCache(dir string) error {
 }
 
 // The profile worker is stopped before this is called.
-func clearProfileCache(dir string) error {
+func clearProfileCache(dir, name string) error {
 	err := clearCache(dir)
 	if !fileBusy(err) {
 		return err
 	}
 	// Old WebView2 browsers may outlive their worker and keep cache open.
-	if recoveryErr := stopOrphanBrowser(filepath.Join(dir, "WebView2")); recoveryErr != nil {
+	if recoveryErr := stopOrphanBrowser(filepath.Join(dir, "WebView2"), name); recoveryErr != nil {
 		return errors.Join(err, recoveryErr)
 	}
 	return clearCache(dir)

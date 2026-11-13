@@ -3,11 +3,18 @@ package workspace
 import "github.com/egoist/mygo"
 
 func Run() error {
+	// Only the workspace takes the lock; --profile workers enter profile.Run.
+	if !mygo.App.RequestSingleInstanceLock() {
+		return nil
+	}
 	workspace, err := openWorkspace()
 	if err != nil {
 		return err
 	}
 	mygo.Bind(workspace)
+	mygo.App.OnSecondInstance(func([]string, string) {
+		workspace.showWindow()
+	})
 	mygo.App.WhenReady(func() {
 		win := mygo.NewWindow(mygo.WindowOptions{
 			Title: "WhatsApp Workspace", Width: 1280, Height: 860,

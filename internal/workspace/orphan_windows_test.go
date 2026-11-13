@@ -86,7 +86,7 @@ func TestOrphanBrowserCleanup(t *testing.T) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	if err := stopOrphanBrowser(webview); err != nil {
+	if err := stopOrphanBrowser(webview, "orphan-test"); err != nil {
 		t.Fatal(err)
 	}
 	handle, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(live.Process.Pid))
@@ -125,7 +125,7 @@ func TestOrphanBrowserCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer process.Kill()
-	if err := clearProfileCache(filepath.Join(dir, "profile")); err != nil {
+	if err := clearProfileCache(filepath.Join(dir, "profile"), "orphan-test"); err != nil {
 		t.Fatalf("cache still locked: %v", err)
 	}
 	if data, err := os.ReadFile(cookie); err != nil || string(data) != "session" {

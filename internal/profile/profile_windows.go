@@ -21,6 +21,11 @@ import (
 
 const whatsappOrigin = "https://web.whatsapp.com"
 
+// EnvProfileData carries the profile's whole storage root from the workspace
+// to its worker. The workspace alone knows the canonical path; the worker
+// trusts it and stores WebView2 data, downloads and settings below it.
+const EnvProfileData = "WHATSAPP_PROFILE_DATA"
+
 //go:embed passive_events.js
 var passiveEventsScript string
 
@@ -50,6 +55,7 @@ type worker struct {
 	downloads *downloadManager
 	themeMu   sync.Mutex
 	theme     string
+	name      string
 }
 
 // mediaList is what the injected script enumerates: microphones and cameras.
@@ -78,16 +84,21 @@ func Run(name string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer os.Stdin.Close()
-	w := &worker{conn: conn, ctx: ctx, theme: start.Theme}
-	// MyGo v0.6.4 has one environment per process, keyed by application name.
+	w := &worker{conn: conn, ctx: ctx, theme: start.Theme, name: name}
+	// Keep the process identity stable while routing all data to one root.
 	mygo.App.SetName(name)
-	// Downloads are the profile's own: its list is saved next to its data.
-	dataDir, _ := mygo.App.Path(mygo.PathUserData)
-	store := ""
-	if dataDir != "" {
-		store = filepath.Join(dataDir, "downloads.json")
+	root := os.Getenv(EnvProfileData)
+	if !filepath.IsAbs(root) || filepath.Base(filepath.Clean(root)) != id {
+		return errors.New("direktori data profil tidak valid")
 	}
-	w.downloads = newDownloadManager(conn.send, store)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return fmt.Errorf("membuat direktori profil: %w", err)
+	}
+	mygo.App.SetPath(mygo.PathUserData, root)
+	if err := os.Setenv("WEBVIEW2_USER_DATA_FOLDER", filepath.Join(root, "WebView2")); err != nil {
+		return fmt.Errorf("mengatur direktori WebView2: %w", err)
+	}
+	w.downloads = newDownloadManager(conn.send, filepath.Join(root, "downloads.json"))
 	// Windows creates one WebView2 environment per process, from the app's
 	// first language, when the first window is made: this has to run before,
 	// and changing it later needs a new worker. The user's languages follow
@@ -96,6 +107,20 @@ func Run(name string) error {
 	mygo.Bind(&ProfileBridge{conn: conn})
 	mygo.App.WhenReady(func() { w.open(cancel) })
 	return mygo.App.Run()
+}
+
+// pruneLegacySkeleton removes the empty WebView2 directory MyGo pre-creates at
+// the legacy root before it honors the user-data-folder override from the
+// workspace. os.Remove only deletes empty directories, so any real data still
+// living there is left alone.
+func pruneLegacySkeleton(name string) {
+	dir := os.Getenv("LOCALAPPDATA")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	legacy := filepath.Join(dir, name)
+	_ = os.Remove(filepath.Join(legacy, "WebView2"))
+	_ = os.Remove(legacy)
 }
 
 func (w *worker) open(cancel context.CancelFunc) {
@@ -114,7 +139,10 @@ func (w *worker) open(cancel context.CancelFunc) {
 	})
 	win.OnClosed(cancel)
 	w.page = win.Page()
-	w.page.OnDidFinishLoad(func() { go w.applyTheme() })
+	w.page.OnDidFinishLoad(func() {
+		pruneLegacySkeleton(w.name)
+		go w.applyTheme()
+	})
 	w.page.OnDidFailLoad(func(err *mygo.LoadError) {
 		w.report(fmt.Errorf("WhatsApp gagal dimuat: %v", err))
 	})

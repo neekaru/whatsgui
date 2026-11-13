@@ -13,6 +13,7 @@ import (
 func TestTabPersistenceAndValidation(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("APPDATA", t.TempDir())
 	mygo.App.SetPath(mygo.PathUserData, dir)
 	t.Cleanup(func() { mygo.App.SetPath(mygo.PathUserData, "") })
 	workspace, err := openWorkspace()
@@ -21,7 +22,7 @@ func TestTabPersistenceAndValidation(t *testing.T) {
 	}
 	first := workspace.data.Tabs[0]
 	second := newTab("Bisnis")
-	if first.ID == second.ID || profileDirectory(profileName(first.ID)) == profileDirectory(profileName(second.ID)) {
+	if first.ID == second.ID || workspace.profileDir(first.ID) == workspace.profileDir(second.ID) {
 		t.Fatal("dua akun harus memiliki direktori WebView2 berbeda")
 	}
 	workspace.data.Tabs = append(workspace.data.Tabs, second)
@@ -42,7 +43,7 @@ func TestTabPersistenceAndValidation(t *testing.T) {
 	if reopened.data.ActiveID != second.ID || reopened.data.Tabs[1].Name != "Tim penjualan" {
 		t.Fatalf("identitas/nama/aktivasi tidak dipersist: %+v", reopened.data)
 	}
-	profileDir := profileDirectory(profileName(second.ID))
+	profileDir := workspace.profileDir(second.ID)
 	if err := os.MkdirAll(profileDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -125,5 +126,76 @@ func TestWindowFitsWorkArea(t *testing.T) {
 				t.Fatalf("window bounds = %+v; want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWorkspaceMigratesAllProfileData(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("APPDATA", t.TempDir())
+	mygo.App.SetPath(mygo.PathUserData, t.TempDir())
+	t.Cleanup(func() { mygo.App.SetPath(mygo.PathUserData, "") })
+	w, err := openWorkspace()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := w.data.Tabs[0].ID
+	canonical := filepath.Join(os.Getenv("LOCALAPPDATA"), mygo.App.Name(), "profiles", id)
+	local := legacyProfileDirectory(profileName(id))
+	roaming := legacySettingsDirectory(profileName(id))
+	if err := os.MkdirAll(filepath.Join(local, "WebView2", "EBWebView"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(roaming, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		filepath.Join("WebView2", "EBWebView", "Cookies"): "signed-in session",
+		"downloads.json": `{"dir":"C:\\Downloads","items":[]}`,
+	}
+	for file, content := range files {
+		oldRoot := local
+		if file == "downloads.json" {
+			oldRoot = roaming
+		}
+		if err := os.WriteFile(filepath.Join(oldRoot, file), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for launch := range 2 {
+		w, err = openWorkspace()
+		if err != nil {
+			t.Fatalf("startup %d: %v", launch+1, err)
+		}
+		for file, content := range files {
+			if got, err := os.ReadFile(filepath.Join(canonical, file)); err != nil || string(got) != content {
+				t.Fatalf("startup %d lost %s: %q, %v", launch+1, file, got, err)
+			}
+		}
+		for _, root := range []string{local, roaming} {
+			if _, err := os.Stat(root); !os.IsNotExist(err) {
+				t.Fatalf("legacy directory remains: %s, %v", root, err)
+			}
+		}
+		if launch == 0 {
+			// Simulate native MyGo recreating its unused default directory.
+			if err := os.MkdirAll(filepath.Join(local, "WebView2"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// Pending deletion must also clear old roaming data, not just WebView2.
+	if err := os.MkdirAll(roaming, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(roaming, "settings.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Remove(id); err != nil {
+		t.Fatal(err)
+	}
+	for _, root := range []string{w.profileDir(id), roaming} {
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			t.Fatalf("deleted profile still has data: %s, %v", root, err)
+		}
 	}
 }

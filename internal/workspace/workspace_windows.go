@@ -158,6 +158,13 @@ func openWorkspace() (*Workspace, error) {
 		}
 		seen[id] = true
 	}
+	// Move each live profile's legacy data into the canonical root before any
+	// of its workers can start. Deleted profiles are cleaned, not migrated.
+	for _, tab := range w.data.Tabs {
+		if err := w.migrateProfile(tab.ID); err != nil {
+			return nil, err
+		}
+	}
 	return w, nil
 }
 
@@ -392,7 +399,7 @@ func (w *Workspace) ClearCache() error {
 	}
 	// WebView2 maps its cache files, so they are cleared with the worker down.
 	w.stop(id)
-	err := clearProfileCache(profileDirectory(profileName(id)))
+	err := clearProfileCache(w.profileDir(id), profileName(id))
 	if startErr := w.start(id); startErr != nil {
 		return errors.Join(err, startErr)
 	}
@@ -517,13 +524,6 @@ func (w *Workspace) request(p *profileProcess, cmd profile.Command) (profile.Mes
 }
 
 func profileName(id string) string { return mygo.App.Name() + "-profile-" + id }
-func profileDirectory(name string) string {
-	dir := os.Getenv("LOCALAPPDATA")
-	if dir == "" {
-		dir = os.TempDir()
-	}
-	return filepath.Join(dir, name)
-}
 
 func (w *Workspace) start(id string) error {
 	if w.closing.Load() {
@@ -545,7 +545,13 @@ func (w *Workspace) start(id string) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	cmd.Stderr = os.Stderr
 	// Keep background WhatsApp audio enabled; do not inherit the shell's debugging port.
-	cmd.Env = append(os.Environ(), "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--autoplay-policy=no-user-gesture-required")
+	// The profile root routes WebView2, downloads and settings under profiles/<id>;
+	// the worker's --profile name stays stable for single-instance identity.
+	root := w.profileDir(id)
+	cmd.Env = append(os.Environ(),
+		"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--autoplay-policy=no-user-gesture-required",
+		profile.EnvProfileData+"="+root,
+	)
 	input, err := cmd.StdinPipe()
 	if err != nil {
 		return err

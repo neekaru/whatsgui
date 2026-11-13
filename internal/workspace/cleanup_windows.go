@@ -24,7 +24,11 @@ type storedState struct {
 func (w *Workspace) cleanupDeleted() error {
 	var failures []error
 	for _, id := range slices.Clone(w.deletedIDs) {
-		if err := removeProfile(profileDirectory(profileName(id))); err != nil {
+		var err error
+		for _, dir := range w.profileDataDirs(id) {
+			err = errors.Join(err, removeProfile(dir, profileName(id)))
+		}
+		if err != nil {
 			failures = append(failures, fmt.Errorf("data profil %s: %w", id, err))
 			continue
 		}
@@ -38,7 +42,7 @@ func (w *Workspace) cleanupDeleted() error {
 	return errors.Join(failures...)
 }
 
-func removeProfile(dir string) error {
+func removeProfile(dir, name string) error {
 	err := os.RemoveAll(dir)
 	if err == nil {
 		return nil
@@ -48,7 +52,7 @@ func removeProfile(dir string) error {
 	}
 	// Upgrade recovery: pre-job workers may have left an orphan browser alive.
 	// Match the exact user-data directory; never kill all WebView2/Edge processes.
-	if err := stopOrphanBrowser(filepath.Join(dir, "WebView2")); err != nil {
+	if err := stopOrphanBrowser(filepath.Join(dir, "WebView2"), name); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(3 * time.Second)
@@ -65,10 +69,10 @@ func fileBusy(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_ACCESS_DENIED) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
 
-func stopOrphanBrowser(dataDir string) error {
+func stopOrphanBrowser(dataDir, name string) error {
 	const script = `$ErrorActionPreference = 'Stop'
 $processes = @(Get-CimInstance Win32_Process)
-$profile = Split-Path -Leaf (Split-Path -Parent $env:WHATSAPP_PROFILE_CLEANUP)
+$profile = $env:WHATSAPP_PROFILE_NAME
 $hostPattern = '(?:^|\s)--profile\s+"?' + [regex]::Escape($profile) + '"?(?:\s|$)'
 if ($processes | Where-Object { $_.CommandLine -match $hostPattern }) {
   throw 'Profil masih digunakan oleh proses lain'
@@ -87,7 +91,7 @@ foreach ($process in $processes) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script)
-	cmd.Env = append(os.Environ(), "WHATSAPP_PROFILE_CLEANUP="+dataDir)
+	cmd.Env = append(os.Environ(), "WHATSAPP_PROFILE_CLEANUP="+dataDir, "WHATSAPP_PROFILE_NAME="+name)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("menutup browser profil lama: %w: %s", err, output)
