@@ -748,7 +748,10 @@ func (w *Workspace) notify(id string, msg profile.Message) error {
 	if !mygo.NotificationsSupported() {
 		return errors.New("notifikasi sistem tidak tersedia")
 	}
-	n := mygo.NewNotification(mygo.NotificationOptions{Title: name + " — " + msg.Title, Body: msg.Body, Silent: msg.Silent})
+	n := mygo.NewNotification(mygo.NotificationOptions{
+		Title: name + " — " + msg.Title, Body: msg.Body, Silent: msg.Silent,
+		Image: msg.Image,
+	})
 	key := id + "/" + msg.Token
 	if msg.Token != "" {
 		w.notifications.Store(key, n)

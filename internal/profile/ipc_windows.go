@@ -2,10 +2,13 @@ package profile
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image/png"
 	"io"
 	"strings"
 	"sync"
@@ -21,6 +24,7 @@ type Message struct {
 	Body    string        `json:"body,omitempty"`
 	Silent  bool          `json:"silent,omitempty"`
 	Token   string        `json:"token,omitempty"`
+	Image   []byte        `json:"image,omitempty"`
 	URL     string        `json:"url,omitempty"`
 	Audio   []MediaDevice `json:"audio,omitempty"`
 	Video   []MediaDevice `json:"video,omitempty"`
@@ -116,11 +120,32 @@ func ValidID(id string) bool {
 // ProfileBridge exposes notifications only, not workspace or filesystem access.
 type ProfileBridge struct{ conn *connection }
 
-func (b *ProfileBridge) Notify(title, body, token string, silent bool) error {
+func (b *ProfileBridge) Notify(title, body, token string, silent bool, encodedImage string) error {
 	if utf8.RuneCountInString(title) > 256 || utf8.RuneCountInString(body) > 4096 || len(token) > 128 {
 		return errors.New("notifikasi terlalu panjang")
 	}
-	return b.conn.send(Message{Kind: "notify", Title: title, Body: body, Token: token, Silent: silent})
+	return b.conn.send(Message{
+		Kind: "notify", Title: title, Body: body, Token: token, Silent: silent,
+		Image: notificationImage(encodedImage),
+	})
+}
+
+// This boundary accepts only the small PNGs produced by notification.js.
+// Bad or oversized pictures are omitted, never allowed to kill text delivery.
+func notificationImage(encoded string) []byte {
+	const maxBytes = 24 << 10
+	if len(encoded) == 0 || len(encoded) > base64.StdEncoding.EncodedLen(maxBytes) {
+		return nil
+	}
+	data, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || len(data) > maxBytes {
+		return nil
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(data))
+	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 128 || config.Height > 128 {
+		return nil
+	}
+	return data
 }
 
 func (b *ProfileBridge) Dismiss(token string) error {
