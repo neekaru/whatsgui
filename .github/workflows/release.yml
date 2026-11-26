@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "Comma-separated GOOS/GOARCH targets"
+        required: false
+        default: "windows/amd64,windows/arm64"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  release:
+    name: Build & Release (${{ inputs.platform || 'windows/amd64,windows/arm64' }})
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck frontend
+        run: bun run typecheck
+
+      - name: Run profile JS tests
+        shell: bash
+        run: node --test internal/profile/*.test.cjs
+
+      - name: Vet and test Go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Cache NSIS
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\mygo\nsis-*
+          key: nsis-${{ hashFiles('bun.lock') }}
+
+      - name: Build Windows installers and binaries
+        env:
+          CGO_ENABLED: "0"
+        run: bun run build -- -platform "${{ inputs.platform || 'windows/amd64,windows/arm64' }}"
+
+      - name: Package portable archives
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist-release | Out-Null
+          Get-ChildItem -Path build -Directory -Filter "windows-*" | ForEach-Object {
+            $target = $_.Name
+            $zipPath = Join-Path "dist-release" "whatsgui-$target.zip"
+            $files = Get-ChildItem -Path $_.FullName -File | Where-Object { $_.Name -notlike "*-setup-*.exe" -and $_.Name -ne ".mygo-files" }
+            if ($files) {
+              Compress-Archive -Path $files.FullName -DestinationPath $zipPath -Force
+            }
+            Get-ChildItem -Path $_.FullName -Filter "*-setup-*.exe" | Copy-Item -Destination dist-release -Force
+          }
+          Get-ChildItem dist-release
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: whatsgui-release
+          path: dist-release/*
+          if-no-files-found: error
+
+      - name: Create or update draft GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            flags=(--draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes)
+            if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+              flags+=(--prerelease)
+            fi
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "${flags[@]}"
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist-release/* --repo "$GITHUB_REPOSITORY" --clobber

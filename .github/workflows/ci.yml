@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  check-and-build:
+    name: Windows CI
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Verify generated MyGo bindings
+        shell: bash
+        run: |
+          bun run generate
+          git diff --exit-code src/mygo.ts
+
+      - name: Typecheck and build frontend
+        run: bun run build:web
+
+      - name: Run profile JS tests
+        shell: bash
+        run: node --test internal/profile/*.test.cjs
+
+      - name: Vet and test Go
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Cache NSIS
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\mygo\nsis-*
+          key: nsis-${{ hashFiles('bun.lock') }}
+
+      - name: Build Windows app
+        env:
+          CGO_ENABLED: "0"
+        run: bun run build -- -platform windows/amd64
+
+      - name: Upload Windows build artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: whatsgui-windows-amd64
+          path: build/windows-amd64/*
+          if-no-files-found: error

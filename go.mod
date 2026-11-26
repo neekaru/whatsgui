@@ -3,7 +3,7 @@ module whatsappgui-new
 go 1.27.3
 
 require (
-	github.com/egoist/mygo v0.9.0
+	github.com/egoist/mygo v0.10.0
 	golang.org/x/sys v0.48.0
 )
 
