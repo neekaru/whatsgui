@@ -9,6 +9,10 @@ on:
         description: "Comma-separated GOOS/GOARCH targets"
         required: false
         default: "windows/amd64,windows/arm64"
+      version:
+        description: "Optional version override (e.g. 0.1.1)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -31,6 +35,7 @@ jobs:
         shell: bash
         env:
           CGO_ENABLED: "0"
+          APP_VERSION: ${{ inputs.version }}
         run: bun run build -- -platform "${{ inputs.platform || 'windows/amd64,windows/arm64' }}"
 
       - name: Package portable archives
