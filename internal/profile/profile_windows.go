@@ -27,22 +27,22 @@ const whatsappOrigin = "https://web.whatsapp.com"
 // trusts it and stores WebView2 data, downloads and settings below it.
 const EnvProfileData = "WHATSAPP_PROFILE_DATA"
 
-//go:embed passive_events.js
+//go:embed scripts/passive_events.js
 var passiveEventsScript string
 
-//go:embed appearance.js
+//go:embed scripts/appearance.js
 var appearanceScript string
 
-//go:embed notification.js
+//go:embed scripts/notification.js
 var notificationScript string
 
-//go:embed media.js
+//go:embed scripts/media.js
 var mediaScript string
 
-//go:embed status_background.js
+//go:embed scripts/status_background.js
 var statusBackgroundScript string
 
-//go:embed unread.js
+//go:embed scripts/unread.js
 var unreadScript string
 
 // preloadScript runs in every WhatsApp page: the main window and call popups.

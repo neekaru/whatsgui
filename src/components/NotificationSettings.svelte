@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Workspace, events, type DNDSettings } from "./mygo";
+  import { Workspace, events, type DNDSettings } from "../lib/mygo";
 
   let settings = $state<DNDSettings | null>(null);
   let saving = $state(false);

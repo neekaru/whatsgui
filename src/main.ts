@@ -1,6 +1,6 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
-import "./style.css";
+import "./styles/app.css";
 
 const target = document.getElementById("app");
 if (!target) throw new Error("Elemen #app tidak ditemukan");

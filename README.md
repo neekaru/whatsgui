@@ -20,6 +20,6 @@ the notification's large icon, not a full-size message-photo preview.
 Checks:
 
 ```sh
-node --test internal/profile/notification.test.cjs
+node --test internal/profile/scripts/notification.test.cjs
 CGO_ENABLED=0 go test ./internal/profile -run 'TestNotificationPhotoFitsProfilePipe|TestInvalidNotificationPhotoKeepsText'
 ```

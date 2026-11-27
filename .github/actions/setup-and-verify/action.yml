@@ -22,7 +22,7 @@ runs:
       shell: bash
       run: |
         bun run generate
-        git diff --exit-code src/mygo.ts
+        git diff --exit-code src/lib/mygo.ts
 
     - name: Typecheck and build frontend
       shell: bash
@@ -30,7 +30,7 @@ runs:
 
     - name: Run profile JS tests
       shell: bash
-      run: node --test internal/profile/*.test.cjs
+      run: node --test internal/profile/scripts/*.test.cjs
 
     - name: Vet and test Go
       shell: bash

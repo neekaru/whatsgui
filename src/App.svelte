@@ -2,8 +2,12 @@
   import { onMount, tick } from "svelte";
   import { on } from "svelte/events";
   import { currentWindow } from "mygo-runtime";
-  import { Workspace, events, type State, type MediaSettings, type DownloadItem, type DownloadPrompt } from "./mygo";
-  import NotificationSettings from "./NotificationSettings.svelte";
+  import { Workspace, events, type State, type MediaSettings, type DownloadItem, type DownloadPrompt } from "./lib/mygo";
+  import { fileKind, joinPath } from "./lib/downloads";
+  import NotificationSettings from "./components/NotificationSettings.svelte";
+  import DownloadConfirmModal from "./components/DownloadConfirmModal.svelte";
+  import DownloadsModal from "./components/DownloadsModal.svelte";
+  import DownloadPreviewBar from "./components/DownloadPreviewBar.svelte";
 
   type Pending = "startup" | "create" | "rename" | "remove" | "activate" | "reload" | "cache" | "devices" | "devtools";
   type Form = "none" | "create" | "rename" | "delete";
@@ -63,45 +67,6 @@
   const isModalOpen = $derived(settingsOpen || form !== "none" || downloadsOpen || currentPrompt !== null);
 
   const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-  function joinPath(dir: string, file: string): string {
-    if (!dir) return file;
-    const sep = dir.includes("/") && !dir.includes("\\") ? "/" : "\\";
-    return dir.endsWith("\\") || dir.endsWith("/") ? `${dir}${file}` : `${dir}${sep}${file}`;
-  }
-
-  function formatBytes(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB"];
-    let value = bytes;
-    let unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
-      value /= 1024;
-      unit++;
-    }
-    return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
-  }
-
-  function fileKind(fileName: string): { badge: string; label: string; tone: string } {
-    const ext = fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
-    if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext)) {
-      return { badge: ext.toUpperCase() || "IMG", label: "Gambar", tone: "image" };
-    }
-    if (ext === "pdf") return { badge: "PDF", label: "Dokumen PDF", tone: "pdf" };
-    if (["mp4", "mkv", "mov", "webm", "avi"].includes(ext)) {
-      return { badge: ext.toUpperCase(), label: "Video", tone: "video" };
-    }
-    if (["mp3", "ogg", "opus", "wav", "m4a", "aac"].includes(ext)) {
-      return { badge: ext.toUpperCase(), label: "Audio", tone: "audio" };
-    }
-    if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) {
-      return { badge: ext.toUpperCase(), label: "Arsip", tone: "archive" };
-    }
-    if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv"].includes(ext)) {
-      return { badge: ext.toUpperCase(), label: "Dokumen", tone: "doc" };
-    }
-    return { badge: ext ? ext.slice(0, 4).toUpperCase() : "FILE", label: "Berkas", tone: "file" };
-  }
 
   async function ensureDownloadPreview(item: DownloadItem) {
     if (item.state !== "done" || item.id in downloadPreviews) return;
@@ -1225,207 +1190,31 @@
 
   <!-- DOWNLOAD CONFIRMATION MODAL -->
   {#if currentPrompt}
-    {@const kind = fileKind(promptName.trim() || currentPrompt.name)}
-    <div class="modal-backdrop" role="presentation">
-      <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="download-confirm-title">
-        <div class="modal-header">
-          <div class="modal-header-info">
-            <div class="modal-icon-badge">
-              <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
-              </svg>
-            </div>
-            <div>
-              <h2 id="download-confirm-title" class="modal-title">Konfirmasi Unduhan</h2>
-              <p class="modal-subtitle">
-                Dari profil <strong>{currentPrompt.profileName || "WhatsApp"}</strong> · {currentPrompt.source}
-              </p>
-            </div>
-          </div>
-          <button
-            class="modal-close-btn"
-            type="button"
-            onclick={() => replyDownloadPrompt(false)}
-            disabled={promptBusy}
-            aria-label="Batalkan unduhan"
-            title="Batal (Esc)"
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <path d="M3 3l10 10M13 3l-10 10" />
-            </svg>
-          </button>
-        </div>
-
-        <form onsubmit={(e) => { e.preventDefault(); void replyDownloadPrompt(true); }}>
-          <div class="modal-body download-confirm-body">
-            <div class="download-file-preview-card">
-              <div class="file-type-tile tone-{kind.tone}">{kind.badge}</div>
-              <div class="download-file-preview-meta">
-                <div class="download-file-preview-name" title={promptName.trim() || currentPrompt.name}>
-                  {promptName.trim() || currentPrompt.name}
-                </div>
-                <div class="download-file-preview-sub">{kind.label} · Siap diunduh</div>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="download-file-name" class="form-label">Nama Berkas</label>
-              <input
-                id="download-file-name"
-                class="modal-input"
-                bind:this={promptNameField}
-                bind:value={promptName}
-                maxlength="200"
-                autocomplete="off"
-                disabled={promptBusy}
-                required
-              />
-            </div>
-
-            <div class="form-group">
-              <div class="download-path-label-row">
-                <span class="form-label">Path Penyimpanan</span>
-                <button
-                  class="btn btn-secondary btn-xs"
-                  type="button"
-                  onclick={pickPromptFolder}
-                  disabled={promptBusy}
-                >
-                  Ubah Folder…
-                </button>
-              </div>
-              <div class="download-path-box" title={promptPreviewPath}>
-                <code>{promptPreviewPath}</code>
-              </div>
-            </div>
-          </div>
-
-          <div class="modal-footer">
-            <div class="modal-footer-btns">
-              <button class="btn btn-secondary" type="button" onclick={() => replyDownloadPrompt(false)} disabled={promptBusy}>
-                Cancel
-              </button>
-              <button class="btn btn-primary" type="submit" disabled={promptBusy}>
-                {promptBusy ? "Memproses…" : "Download"}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </div>
+    <DownloadConfirmModal
+      prompt={currentPrompt}
+      bind:name={promptName}
+      previewPath={promptPreviewPath}
+      busy={promptBusy}
+      bind:nameField={promptNameField}
+      onPickFolder={pickPromptFolder}
+      onReply={replyDownloadPrompt}
+    />
   {/if}
 
   <!-- DOWNLOADS LIST MODAL -->
   {#if downloadsOpen}
-    <div
-      class="modal-backdrop"
-      role="presentation"
-      onclick={(e) => { if (e.target === e.currentTarget) downloadsOpen = false; }}
-    >
-      <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="downloads-title">
-        <div class="modal-header">
-          <div class="modal-header-info">
-            <div class="modal-icon-badge">
-              <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
-              </svg>
-            </div>
-            <div class="downloads-header-meta">
-              <h2 id="downloads-title" class="modal-title">Daftar Unduhan</h2>
-              <p class="modal-subtitle" title={downloadDir}>
-                Folder default: <code>{downloadDir || "Belum ditentukan"}</code>
-              </p>
-            </div>
-          </div>
-          <button
-            class="modal-close-btn"
-            type="button"
-            onclick={() => (downloadsOpen = false)}
-            aria-label="Tutup daftar unduhan"
-            title="Tutup (Esc)"
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-              <path d="M3 3l10 10M13 3l-10 10" />
-            </svg>
-          </button>
-        </div>
-
-        <div class="modal-body">
-          {#if downloads.length === 0}
-            <div class="info-alert">
-              <p>Belum ada berkas yang diunduh pada sesi ini.</p>
-            </div>
-          {:else}
-            <div class="downloads-list">
-              {#each downloads as item (item.id)}
-                {@const kind = fileKind(item.name)}
-                {@const thumb = downloadPreviews[item.id]}
-                <div class="download-row">
-                  <div class="download-thumb">
-                    {#if thumb}
-                      <img src={thumb} alt={item.name} class="download-thumb-img" />
-                    {:else}
-                      <div class="file-type-tile tone-{kind.tone}">{kind.badge}</div>
-                    {/if}
-                  </div>
-                  <div class="download-row-info">
-                    <div class="download-row-top">
-                      <span class="download-row-name" title={item.name}>{item.name}</span>
-                      <span class="download-state-pill state-{item.state}">
-                        {#if item.state === "active"}
-                          Mengunduh… · {formatBytes(item.received)}
-                        {:else if item.state === "done"}
-                          Selesai · {formatBytes(item.received)}
-                        {:else}
-                          Gagal
-                        {/if}
-                      </span>
-                      <span class="download-profile-tag">{item.profileName}</span>
-                    </div>
-                    {#if item.path}
-                      <div class="download-row-path" title={item.path}>
-                        <code>{item.path}</code>
-                      </div>
-                    {/if}
-                    {#if item.error}
-                      <div class="download-row-error">{item.error}</div>
-                    {/if}
-                  </div>
-                  <div class="download-row-actions">
-                    {#if item.path}
-                      <button class="btn btn-secondary btn-xs" type="button" onclick={() => copyDownloadPath(item.id, item.path)}>
-                        {copiedDownloadId === item.id ? "Tersalin" : "Salin Path"}
-                      </button>
-                      <button class="btn btn-secondary btn-xs" type="button" onclick={() => showDownloadItem(item.id)}>
-                        Folder
-                      </button>
-                    {/if}
-                    {#if item.state === "done"}
-                      <button class="btn btn-primary btn-xs" type="button" onclick={() => openDownloadItem(item.id)}>
-                        Buka
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-
-        <div class="modal-footer">
-          {#if active}
-            <button class="btn btn-secondary" type="button" onclick={changeDefaultDownloadDir}>
-              Ubah Folder Default…
-            </button>
-          {/if}
-          <div class="modal-footer-btns">
-            <button class="btn btn-primary" type="button" onclick={() => (downloadsOpen = false)}>
-              Tutup
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+    <DownloadsModal
+      {downloads}
+      {downloadDir}
+      previews={downloadPreviews}
+      copiedId={copiedDownloadId}
+      hasActiveProfile={Boolean(active)}
+      onClose={() => (downloadsOpen = false)}
+      onCopyPath={copyDownloadPath}
+      onShowFolder={showDownloadItem}
+      onOpenFile={openDownloadItem}
+      onChangeDefaultDir={changeDefaultDownloadDir}
+    />
   {/if}
 
   <!-- Active Profile Viewport (Where native child window is placed) -->
@@ -1466,72 +1255,15 @@
 
   <!-- Live Download Preview & Path Shelf (outside #profile-view so HWND never covers it) -->
   {#if downloadPreviewVisible && latestDownload}
-    {@const kind = fileKind(latestDownload.name)}
-    {@const thumb = downloadPreviews[latestDownload.id]}
-    <section class="download-preview-bar" aria-label="Preview Unduhan">
-      <div class="download-preview-left">
-        <div class="download-thumb">
-          {#if thumb}
-            <img src={thumb} alt={latestDownload.name} class="download-thumb-img" />
-          {:else}
-            <div class="file-type-tile tone-{kind.tone}">{kind.badge}</div>
-          {/if}
-        </div>
-        <div class="download-preview-details">
-          <div class="download-preview-top">
-            <strong class="download-preview-name" title={latestDownload.name}>{latestDownload.name}</strong>
-            <span class="download-state-pill state-{latestDownload.state}">
-              {#if latestDownload.state === "active"}
-                Mengunduh… · {formatBytes(latestDownload.received)}
-              {:else if latestDownload.state === "done"}
-                Selesai · {formatBytes(latestDownload.received)}
-              {:else}
-                Gagal{latestDownload.error ? `: ${latestDownload.error}` : ""}
-              {/if}
-            </span>
-            <span class="download-profile-tag">{latestDownload.profileName}</span>
-          </div>
-          {#if latestDownload.path}
-            <div class="download-preview-path" title={latestDownload.path}>
-              <span class="download-path-prefix">Path:</span>
-              <code>{latestDownload.path}</code>
-            </div>
-          {/if}
-        </div>
-      </div>
-      <div class="download-preview-actions">
-        {#if latestDownload.path}
-          <button
-            class="btn btn-secondary btn-xs"
-            type="button"
-            onclick={() => copyDownloadPath(latestDownload.id, latestDownload.path)}
-          >
-            {copiedDownloadId === latestDownload.id ? "Tersalin" : "Salin Path"}
-          </button>
-          <button class="btn btn-secondary btn-xs" type="button" onclick={() => showDownloadItem(latestDownload.id)}>
-            Tampilkan di Folder
-          </button>
-        {/if}
-        {#if latestDownload.state === "done"}
-          <button class="btn btn-primary btn-xs" type="button" onclick={() => openDownloadItem(latestDownload.id)}>
-            Buka
-          </button>
-        {/if}
-        <button class="btn btn-secondary btn-xs" type="button" onclick={openDownloadsModal}>
-          Semua
-        </button>
-        <button
-          class="modal-close-btn download-preview-close"
-          type="button"
-          onclick={() => (downloadPreviewVisible = false)}
-          aria-label="Tutup preview unduhan"
-          title="Tutup preview"
-        >
-          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M3 3l10 10M13 3l-10 10" />
-          </svg>
-        </button>
-      </div>
-    </section>
+    <DownloadPreviewBar
+      item={latestDownload}
+      previewUrl={downloadPreviews[latestDownload.id] ?? ""}
+      copied={copiedDownloadId === latestDownload.id}
+      onCopyPath={() => copyDownloadPath(latestDownload.id, latestDownload.path)}
+      onShowFolder={() => showDownloadItem(latestDownload.id)}
+      onOpenFile={() => openDownloadItem(latestDownload.id)}
+      onShowAll={openDownloadsModal}
+      onDismiss={() => (downloadPreviewVisible = false)}
+    />
   {/if}
 </div>
