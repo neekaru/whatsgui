@@ -66,9 +66,10 @@ type downloadManager struct {
 	dir   string
 	items []DownloadItem
 	// live holds the progress watcher of each running download.
-	live    map[string]chan struct{}
-	send    func(Message) error
-	confirm func(DownloadPrompt) downloadDecision
+	live       map[string]chan struct{}
+	send       func(Message) error
+	confirm    func(DownloadPrompt) downloadDecision
+	allowStart func() bool
 }
 
 func newDownloadManager(send func(Message) error, file string) *downloadManager {
@@ -167,6 +168,12 @@ func (d *downloadManager) setConfirm(fn func(DownloadPrompt) downloadDecision) {
 	d.mu.Unlock()
 }
 
+func (d *downloadManager) setAllowStart(fn func() bool) {
+	d.mu.Lock()
+	d.allowStart = fn
+	d.mu.Unlock()
+}
+
 func cleanDownloadDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" || !filepath.IsAbs(dir) || strings.ContainsRune(dir, 0) || utf8.RuneCountInString(dir) > 1024 {
@@ -215,6 +222,14 @@ func (d *downloadManager) announce() {
 // begin chooses the file a page download is written to. It runs on the page's
 // UI thread, so confirmation waits using Win32 message pumping via confirm.
 func (d *downloadManager) begin(e *mygo.DownloadEvent) {
+	d.mu.Lock()
+	allowStart := d.allowStart
+	confirm := d.confirm
+	d.mu.Unlock()
+	if allowStart != nil && !allowStart() {
+		e.PreventDefault()
+		return
+	}
 	name := safeFileName(e.SuggestedName)
 	if !downloadAllowed(e.URL) {
 		e.PreventDefault()
@@ -222,9 +237,6 @@ func (d *downloadManager) begin(e *mygo.DownloadEvent) {
 		return
 	}
 	dir := d.downloadDir()
-	d.mu.Lock()
-	confirm := d.confirm
-	d.mu.Unlock()
 
 	id := newDownloadID()
 	if confirm != nil {

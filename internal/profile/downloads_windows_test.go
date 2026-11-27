@@ -129,4 +129,17 @@ func TestDownloadConfirmAcceptAndCancel(t *testing.T) {
 		t.Fatalf("broadcast unduhan tidak memuat path baru: %+v", sent)
 	}
 	dm.finish(&mygo.Download{URL: evAccept.URL, Path: wantPath})
+
+	// Before page finishes initial load: allowStart returns false -> silent prevent.
+	confirmedEarly := false
+	dm.setAllowStart(func() bool { return false })
+	dm.setConfirm(func(req DownloadPrompt) downloadDecision {
+		confirmedEarly = true
+		return downloadDecision{Accept: true}
+	})
+	evEarly := &mygo.DownloadEvent{URL: "https://web.whatsapp.com/early", SuggestedName: "early.pdf"}
+	dm.begin(evEarly)
+	if confirmedEarly || evEarly.Path != "" || len(dm.items) != 1 {
+		t.Fatalf("unduhan sebelum halaman siap seharusnya dicegah diam-diam: confirmed=%v path=%q items=%d", confirmedEarly, evEarly.Path, len(dm.items))
+	}
 }

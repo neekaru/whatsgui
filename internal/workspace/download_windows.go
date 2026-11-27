@@ -52,19 +52,29 @@ type DownloadPrompt struct {
 // DownloadsChanged sends the downloads of every profile after any change.
 var DownloadsChanged = mygo.NewEvent[[]DownloadItem]("downloadsChanged")
 
+// DownloadUpdated sends a live download item when it starts, progresses, or finishes.
+var DownloadUpdated = mygo.NewEvent[DownloadItem]("downloadUpdated")
+
 // DownloadPrompted asks the UI to confirm or cancel an incoming download.
 var DownloadPrompted = mygo.NewEvent[DownloadPrompt]("downloadPrompted")
 
 // mergeDownload records a download a profile reported and tells the UI.
 func (w *Workspace) mergeDownload(profileID string, item profile.DownloadItem, dir string) {
+	merged := downloadItem(profileID, item)
 	w.dlMu.Lock()
 	if w.downloadItems == nil {
 		w.downloadItems = map[string]DownloadItem{}
 	}
-	w.downloadItems[item.ID] = downloadItem(profileID, item)
+	w.downloadItems[item.ID] = merged
 	w.mergeDownloadDir(profileID, dir)
 	w.dlMu.Unlock()
-	go w.publishDownloads()
+	go func() {
+		w.publishDownloads()
+		if w.window != nil {
+			merged.ProfileName = w.profileName(profileID)
+			_ = DownloadUpdated.Emit(w.window, merged)
+		}
+	}()
 }
 
 // mergeDownloads records the list a profile sends when its page opens.
@@ -232,16 +242,19 @@ func (w *Workspace) findDownload(id string) (DownloadItem, error) {
 	return item, nil
 }
 
-func (w *Workspace) queueDownloadPrompt(profileID string, p profile.DownloadPrompt) {
-	profileName := ""
+func (w *Workspace) profileName(profileID string) string {
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	for _, tab := range w.data.Tabs {
 		if tab.ID == profileID {
-			profileName = tab.Name
-			break
+			return tab.Name
 		}
 	}
-	w.mu.Unlock()
+	return ""
+}
+
+func (w *Workspace) queueDownloadPrompt(profileID string, p profile.DownloadPrompt) {
+	profileName := w.profileName(profileID)
 
 	prompt := DownloadPrompt{
 		ID:          p.ID,

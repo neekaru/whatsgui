@@ -179,6 +179,8 @@ export const events = {
   dndChanged: event<DNDSettings>("dndChanged"),
   /** DownloadsChanged sends the downloads of every profile after any change. */
   downloadsChanged: event<DownloadItem[]>("downloadsChanged"),
+  /** DownloadUpdated sends a live download item when it starts, progresses, or finishes. */
+  downloadUpdated: event<DownloadItem>("downloadUpdated"),
   /** DownloadPrompted asks the UI to confirm or cancel an incoming download. */
   downloadPrompted: event<DownloadPrompt>("downloadPrompted"),
   workspaceChanged: event<State>("workspaceChanged"),

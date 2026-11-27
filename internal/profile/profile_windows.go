@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -55,6 +56,7 @@ type worker struct {
 	ctx              context.Context
 	downloads        *downloadManager
 	pendingDownloads sync.Map
+	mainReady        atomic.Bool
 	themeMu          sync.Mutex
 	theme            string
 	name             string
@@ -102,6 +104,7 @@ func Run(name string) error {
 	}
 	w.downloads = newDownloadManager(conn.send, filepath.Join(root, "downloads.json"))
 	w.downloads.setConfirm(w.confirmDownload)
+	w.downloads.setAllowStart(w.mainReady.Load)
 	// Windows creates one WebView2 environment per process, from the app's
 	// first language, when the first window is made: this has to run before,
 	// and changing it later needs a new worker. The user's languages follow
@@ -143,6 +146,7 @@ func (w *worker) open(cancel context.CancelFunc) {
 	win.OnClosed(cancel)
 	w.page = win.Page()
 	w.page.OnDidFinishLoad(func() {
+		w.mainReady.Store(true)
 		pruneLegacySkeleton(w.name)
 		go w.applyTheme()
 	})

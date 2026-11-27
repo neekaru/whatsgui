@@ -41,7 +41,6 @@
   let downloadPreviewVisible = $state(false);
   let downloadPreviews = $state<Record<string, string>>({});
   let copiedDownloadId = $state("");
-  let lastSeenDownloadKey = "";
 
   let view = $state<HTMLElement>();
   let tablist = $state<HTMLElement>();
@@ -82,18 +81,10 @@
     }
   }
 
-  function applyDownloads(list: DownloadItem[], revealOnChange: boolean) {
+  function applyDownloads(list: DownloadItem[]) {
     downloads = list;
-    const head = list[0];
-    if (head) {
-      const nextKey = `${head.id}|${head.state}`;
-      if (revealOnChange && nextKey !== lastSeenDownloadKey) {
-        downloadPreviewVisible = true;
-      }
-      lastSeenDownloadKey = nextKey;
-      for (const item of list.slice(0, 8)) {
-        if (item.state === "done") void ensureDownloadPreview(item);
-      }
+    for (const item of list.slice(0, 8)) {
+      if (item.state === "done") void ensureDownloadPreview(item);
     }
     void Workspace.downloadDirectory()
       .then((dir) => { if (dir) downloadDir = dir; })
@@ -140,7 +131,7 @@
     error = "";
     try {
       const [list, dir] = await Promise.all([Workspace.downloads(), Workspace.downloadDirectory()]);
-      applyDownloads(list, false);
+      applyDownloads(list);
       if (dir) downloadDir = dir;
     } catch (e) {
       error = reason(e);
@@ -469,7 +460,13 @@
       error = text;
     });
     const offDownloads = events.downloadsChanged.on((list) => {
-      applyDownloads(list, true);
+      applyDownloads(list);
+    });
+    const offDownloadUpdated = events.downloadUpdated.on((item) => {
+      if (!loading) {
+        downloadPreviewVisible = true;
+      }
+      if (item.state === "done") void ensureDownloadPreview(item);
     });
     const offDownloadPrompt = events.downloadPrompted.on((prompt) => {
       if (!downloadPrompts.some((item) => item.id === prompt.id)) {
@@ -509,7 +506,7 @@
           Workspace.downloadDirectory(),
           Workspace.pendingDownloads(),
         ]);
-        applyDownloads(list, false);
+        applyDownloads(list);
         if (dir) downloadDir = dir;
         if (pendingPrompts.length) downloadPrompts = pendingPrompts;
       } catch {
@@ -521,6 +518,7 @@
       offState();
       offError();
       offDownloads();
+      offDownloadUpdated();
       offDownloadPrompt();
       window.removeEventListener("keydown", onEscape);
       window.removeEventListener("resize", onResize);
@@ -1189,7 +1187,7 @@
   {/if}
 
   <!-- DOWNLOAD CONFIRMATION MODAL -->
-  {#if currentPrompt}
+  {#if !loading && currentPrompt}
     <DownloadConfirmModal
       prompt={currentPrompt}
       bind:name={promptName}
@@ -1254,7 +1252,7 @@
   </div>
 
   <!-- Live Download Preview & Path Shelf (outside #profile-view so HWND never covers it) -->
-  {#if downloadPreviewVisible && latestDownload}
+  {#if !loading && downloadPreviewVisible && latestDownload}
     <DownloadPreviewBar
       item={latestDownload}
       previewUrl={downloadPreviews[latestDownload.id] ?? ""}
