@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -215,15 +214,11 @@ func (w *Workspace) ShowDownload(id string) error {
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(item.Path); err != nil || info.IsDir() {
+	clean := filepath.Clean(item.Path)
+	if info, err := os.Stat(clean); err != nil || info.IsDir() {
 		return errors.New("berkas unduhan tidak ditemukan")
 	}
-	cmd := exec.Command("explorer.exe", "/select,"+item.Path)
-	if err := cmd.Start(); err != nil {
-		// Explorer is not always on PATH; the folder is still worth opening.
-		return mygo.Shell.OpenPath(filepath.Dir(item.Path))
-	}
-	go cmd.Wait()
+	mygo.Shell.ShowItemInFolder(clean)
 	return nil
 }
 
