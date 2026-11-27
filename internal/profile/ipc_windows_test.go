@@ -83,9 +83,15 @@ func TestMediaCommands(t *testing.T) {
 	for _, input := range []string{
 		"{\"action\":\"setmedia\",\"audioId\":\"" + strings.Repeat("x", 257) + "\"}\n",
 		"{\"action\":\"media\",\"id\":\"" + strings.Repeat("x", 65) + "\"}\n",
+		"{\"action\":\"downloadreply\"}\n",
+		"{\"action\":\"downloadreply\",\"id\":\"abc\",\"name\":\"" + strings.Repeat("x", 257) + "\"}\n",
 	} {
 		if _, err := newConnection(strings.NewReader(input), io.Discard).receive(); err == nil {
 			t.Fatalf("input media tidak valid diterima: %q", input)
 		}
+	}
+	cmd, err := newConnection(strings.NewReader("{\"action\":\"downloadreply\",\"id\":\"dl1\",\"accept\":true,\"name\":\"baru.pdf\"}\n"), io.Discard).receive()
+	if err != nil || cmd.Action != "downloadreply" || !cmd.Accept || cmd.Name != "baru.pdf" {
+		t.Fatalf("downloadreply valid ditolak: %+v %v", cmd, err)
 	}
 }

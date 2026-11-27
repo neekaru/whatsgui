@@ -34,9 +34,20 @@ type Message struct {
 	Err     string        `json:"err,omitempty"`
 	// Dir is the folder this profile saves downloads to.
 	Dir string `json:"dir,omitempty"`
-	// Download is one changed download; Downloads is the saved list.
-	Download  *DownloadItem  `json:"download,omitempty"`
-	Downloads []DownloadItem `json:"downloads,omitempty"`
+	// Download is one changed download; Downloads is the saved list; Prompt asks
+	// the workspace whether a download should proceed.
+	Download  *DownloadItem   `json:"download,omitempty"`
+	Downloads []DownloadItem  `json:"downloads,omitempty"`
+	Prompt    *DownloadPrompt `json:"prompt,omitempty"`
+}
+
+// DownloadPrompt describes a pending download awaiting user confirmation.
+type DownloadPrompt struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Dir    string `json:"dir"`
+	Path   string `json:"path"`
+	Source string `json:"source"`
 }
 
 // MediaDevice is a microphone or camera the profile's WebView2 reports.
@@ -54,6 +65,8 @@ type Command struct {
 	VideoID string `json:"videoId"`
 	Theme   string `json:"theme"`
 	Dir     string `json:"dir"`
+	Name    string `json:"name,omitempty"`
+	Accept  bool   `json:"accept,omitempty"`
 }
 
 // One reader owns stdin; the encoder is shared by page callbacks and bound methods.
@@ -99,6 +112,10 @@ func (c *connection) receive() (Command, error) {
 	case "setdownloaddir":
 		if len(cmd.Dir) > 1024 || strings.ContainsRune(cmd.Dir, 0) {
 			return cmd, errors.New("folder unduhan tidak valid")
+		}
+	case "downloadreply":
+		if cmd.ID == "" || len(cmd.Dir) > 1024 || strings.ContainsRune(cmd.Dir, 0) || utf8.RuneCountInString(cmd.Name) > 256 || strings.ContainsRune(cmd.Name, 0) {
+			return cmd, errors.New("balasan konfirmasi unduhan tidak valid")
 		}
 	default:
 		return cmd, fmt.Errorf("perintah profil tidak dikenal: %q", cmd.Action)

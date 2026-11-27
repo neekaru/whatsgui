@@ -98,9 +98,10 @@ type Workspace struct {
 	deletedIDs    []string
 	// dlMu guards the downloads of every profile, which the profile readers
 	// update without waiting for mu.
-	dlMu          sync.Mutex
-	downloadItems map[string]DownloadItem
-	downloadDirs  map[string]string
+	dlMu            sync.Mutex
+	downloadItems   map[string]DownloadItem
+	downloadDirs    map[string]string
+	downloadPrompts map[string]DownloadPrompt
 }
 
 func openWorkspace() (*Workspace, error) {
@@ -623,6 +624,10 @@ func (w *Workspace) start(id string) error {
 				if msg.Download != nil {
 					w.mergeDownload(id, *msg.Download, msg.Dir)
 				}
+			case "download_ask":
+				if msg.Prompt != nil {
+					w.queueDownloadPrompt(id, *msg.Prompt)
+				}
 			case "downloads":
 				if msg.ID != "" {
 					// The reply to a folder change.
@@ -643,6 +648,7 @@ func (w *Workspace) start(id string) error {
 		}
 		cmd.Wait()
 		close(p.done)
+		w.clearDownloadPrompts(id)
 		if !w.closing.Load() && !p.stopping.Load() {
 			// No page means no count: a stale number would outlive its tab.
 			w.setUnread(id, 0)

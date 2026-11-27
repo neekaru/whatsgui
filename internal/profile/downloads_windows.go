@@ -51,6 +51,13 @@ type downloadStore struct {
 	Items []DownloadItem `json:"items"`
 }
 
+// downloadDecision is the user's answer to a download confirmation dialog.
+type downloadDecision struct {
+	Accept bool
+	Dir    string
+	Name   string
+}
+
 // downloadManager saves the downloads of one profile in its own folder and
 // reports them to the workspace. Only the worker of that profile owns one.
 type downloadManager struct {
@@ -59,8 +66,9 @@ type downloadManager struct {
 	dir   string
 	items []DownloadItem
 	// live holds the progress watcher of each running download.
-	live map[string]chan struct{}
-	send func(Message) error
+	live    map[string]chan struct{}
+	send    func(Message) error
+	confirm func(DownloadPrompt) downloadDecision
 }
 
 func newDownloadManager(send func(Message) error, file string) *downloadManager {
@@ -153,13 +161,27 @@ func (d *downloadManager) downloadDir() string {
 	return d.dir
 }
 
-// setDir chooses where this profile saves downloads, for every later download.
-func (d *downloadManager) setDir(dir string) error {
+func (d *downloadManager) setConfirm(fn func(DownloadPrompt) downloadDecision) {
+	d.mu.Lock()
+	d.confirm = fn
+	d.mu.Unlock()
+}
+
+func cleanDownloadDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" || !filepath.IsAbs(dir) || strings.ContainsRune(dir, 0) || utf8.RuneCountInString(dir) > 1024 {
-		return errors.New("folder unduhan tidak valid")
+		return "", errors.New("folder unduhan tidak valid")
 	}
-	dir = filepath.Clean(dir)
+	return filepath.Clean(dir), nil
+}
+
+// setDir chooses where this profile saves downloads, for every later download.
+func (d *downloadManager) setDir(dir string) error {
+	var err error
+	dir, err = cleanDownloadDir(dir)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("folder unduhan tidak dapat dibuat: %w", err)
 	}
@@ -191,7 +213,7 @@ func (d *downloadManager) announce() {
 }
 
 // begin chooses the file a page download is written to. It runs on the page's
-// UI thread, so it only touches the disk and the pipe.
+// UI thread, so confirmation waits using Win32 message pumping via confirm.
 func (d *downloadManager) begin(e *mygo.DownloadEvent) {
 	name := safeFileName(e.SuggestedName)
 	if !downloadAllowed(e.URL) {
@@ -200,6 +222,36 @@ func (d *downloadManager) begin(e *mygo.DownloadEvent) {
 		return
 	}
 	dir := d.downloadDir()
+	d.mu.Lock()
+	confirm := d.confirm
+	d.mu.Unlock()
+
+	id := newDownloadID()
+	if confirm != nil {
+		decision := confirm(DownloadPrompt{
+			ID:     id,
+			Name:   name,
+			Dir:    dir,
+			Path:   previewPath(dir, name),
+			Source: shortDownloadSource(e.URL),
+		})
+		if !decision.Accept {
+			e.PreventDefault()
+			return
+		}
+		if decision.Dir != "" {
+			cleanDir, err := cleanDownloadDir(decision.Dir)
+			if err != nil {
+				e.PreventDefault()
+				d.fail(name, err.Error())
+				return
+			}
+			dir = cleanDir
+		}
+		if strings.TrimSpace(decision.Name) != "" {
+			name = safeFileName(decision.Name)
+		}
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		e.PreventDefault()
 		d.fail(name, "folder unduhan tidak dapat dibuat: "+err.Error())
@@ -214,7 +266,6 @@ func (d *downloadManager) begin(e *mygo.DownloadEvent) {
 		return
 	}
 	e.Path = file
-	id := newDownloadID()
 	item := DownloadItem{
 		ID: id, Name: filepath.Base(file), Path: file,
 		State: DownloadActive, StartedAt: time.Now().UnixMilli(),
@@ -350,6 +401,7 @@ func safeFileName(name string) string {
 		return r
 	}, name)
 	// Windows drops trailing dots and spaces, which would change the name.
+	name = strings.TrimSpace(name)
 	name = strings.TrimRight(name, " .")
 	if name == "" || name == "." || name == ".." {
 		name = "unduhan"
@@ -393,6 +445,41 @@ func reserve(dir, name string) (string, error) {
 		}
 	}
 	return "", errors.New("terlalu banyak berkas dengan nama yang sama")
+}
+
+// previewPath returns the non-existing file path that reserve would pick,
+// without creating the file on disk yet.
+func previewPath(dir, name string) string {
+	ext := path.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 1; i <= 1000; i++ {
+		file := filepath.Join(dir, name)
+		if i > 1 {
+			file = filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, i, ext))
+		}
+		if _, err := os.Lstat(file); errors.Is(err, fs.ErrNotExist) {
+			return file
+		}
+	}
+	return filepath.Join(dir, name)
+}
+
+// shortDownloadSource formats a download URL into a concise, bounded label
+// safe for the 64 KiB profile IPC line limit.
+func shortDownloadSource(raw string) string {
+	if strings.HasPrefix(raw, "data:") {
+		return "Data tersemat WhatsApp"
+	}
+	if rest, ok := strings.CutPrefix(raw, "blob:"); ok {
+		if u, err := url.Parse(rest); err == nil && u.Hostname() != "" {
+			return u.Hostname() + " (blob)"
+		}
+		return "Berkas sementara WhatsApp"
+	}
+	if u, err := url.Parse(raw); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return "WhatsApp"
 }
 
 func newDownloadID() string {

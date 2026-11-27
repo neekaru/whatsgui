@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"whatsappgui-new/internal/win32"
 )
 
 const whatsappOrigin = "https://web.whatsapp.com"
@@ -49,13 +50,14 @@ var unreadScript string
 var preloadScript = passiveEventsScript + "\n" + appearanceScript + "\n" + notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
 
 type worker struct {
-	conn      *connection
-	page      *mygo.Page
-	ctx       context.Context
-	downloads *downloadManager
-	themeMu   sync.Mutex
-	theme     string
-	name      string
+	conn             *connection
+	page             *mygo.Page
+	ctx              context.Context
+	downloads        *downloadManager
+	pendingDownloads sync.Map
+	themeMu          sync.Mutex
+	theme            string
+	name             string
 }
 
 // mediaList is what the injected script enumerates: microphones and cameras.
@@ -99,6 +101,7 @@ func Run(name string) error {
 		return fmt.Errorf("mengatur direktori WebView2: %w", err)
 	}
 	w.downloads = newDownloadManager(conn.send, filepath.Join(root, "downloads.json"))
+	w.downloads.setConfirm(w.confirmDownload)
 	// Windows creates one WebView2 environment per process, from the app's
 	// first language, when the first window is made: this has to run before,
 	// and changing it later needs a new worker. The user's languages follow
@@ -234,6 +237,13 @@ func (w *worker) readCommands() {
 				msg.Dir = w.downloads.downloadDir()
 			}
 			w.reply(msg)
+		case "downloadreply":
+			if ch, ok := w.pendingDownloads.LoadAndDelete(cmd.ID); ok {
+				select {
+				case ch.(chan Command) <- cmd:
+				default:
+				}
+			}
 		case "quit":
 			return
 		case "devtools":
@@ -249,6 +259,36 @@ func (w *worker) readCommands() {
 			return
 		}
 	}
+}
+
+func (w *worker) confirmDownload(req DownloadPrompt) downloadDecision {
+	ch := make(chan Command, 1)
+	w.pendingDownloads.Store(req.ID, ch)
+	defer w.pendingDownloads.Delete(req.ID)
+
+	if err := w.conn.send(Message{Kind: "download_ask", ID: req.ID, Prompt: &req}); err != nil {
+		return downloadDecision{}
+	}
+
+	var decision downloadDecision
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		timer := time.NewTimer(5 * time.Minute)
+		defer timer.Stop()
+		select {
+		case cmd := <-ch:
+			decision = downloadDecision{
+				Accept: cmd.Accept,
+				Dir:    cmd.Dir,
+				Name:   cmd.Name,
+			}
+		case <-w.ctx.Done():
+		case <-timer.C:
+		}
+	}()
+	win32.WaitWithMessagePump(done)
+	return decision
 }
 
 func (w *worker) preload() string {

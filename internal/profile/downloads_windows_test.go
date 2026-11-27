@@ -1,10 +1,13 @@
 package profile
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo"
 )
 
 func TestSafeFileName(t *testing.T) {
@@ -84,4 +87,46 @@ func TestDownloadAllowed(t *testing.T) {
 			t.Fatalf("downloadAllowed(%q) = %v, ingin %v", raw, got, allowed)
 		}
 	}
+}
+
+func TestDownloadConfirmAcceptAndCancel(t *testing.T) {
+	dir := t.TempDir()
+	altDir := filepath.Join(dir, "khusus")
+	var sent []Message
+	dm := newDownloadManager(func(m Message) error {
+		sent = append(sent, m)
+		return nil
+	}, filepath.Join(dir, "downloads.json"))
+	dm.dir = dir
+
+	// Cancel: prevents download and leaves no file on disk.
+	dm.setConfirm(func(req DownloadPrompt) downloadDecision {
+		if req.Name != "laporan.pdf" || req.Path != filepath.Join(dir, "laporan.pdf") {
+			t.Fatalf("prompt tidak sesuai: %+v", req)
+		}
+		return downloadDecision{Accept: false}
+	})
+	evCancel := &mygo.DownloadEvent{URL: "https://web.whatsapp.com/a", SuggestedName: "laporan.pdf"}
+	dm.begin(evCancel)
+	if evCancel.Path != "" || len(sent) != 0 || len(dm.items) != 0 {
+		t.Fatalf("unduhan yang dibatalkan seharusnya tidak berjalan: path=%q sent=%d items=%d", evCancel.Path, len(sent), len(dm.items))
+	}
+	if _, err := os.Stat(filepath.Join(dir, "laporan.pdf")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("berkas tidak boleh dibuat saat dibatalkan: %v", err)
+	}
+
+	// Accept with custom directory and renamed filename.
+	dm.setConfirm(func(req DownloadPrompt) downloadDecision {
+		return downloadDecision{Accept: true, Dir: altDir, Name: "hasil-akhir.pdf"}
+	})
+	evAccept := &mygo.DownloadEvent{URL: "https://web.whatsapp.com/b", SuggestedName: "laporan.pdf"}
+	dm.begin(evAccept)
+	wantPath := filepath.Join(altDir, "hasil-akhir.pdf")
+	if evAccept.Path != wantPath {
+		t.Fatalf("path unduhan = %q, ingin %q", evAccept.Path, wantPath)
+	}
+	if len(sent) == 0 || sent[len(sent)-1].Download == nil || sent[len(sent)-1].Download.Path != wantPath {
+		t.Fatalf("broadcast unduhan tidak memuat path baru: %+v", sent)
+	}
+	dm.finish(&mygo.Download{URL: evAccept.URL, Path: wantPath})
 }

@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { on } from "svelte/events";
   import { currentWindow } from "mygo-runtime";
-  import { Workspace, events, type State, type MediaSettings } from "./mygo";
+  import { Workspace, events, type State, type MediaSettings, type DownloadItem, type DownloadPrompt } from "./mygo";
   import NotificationSettings from "./NotificationSettings.svelte";
 
   type Pending = "startup" | "create" | "rename" | "remove" | "activate" | "reload" | "cache" | "devices" | "devtools";
@@ -27,18 +27,197 @@
   let settingsMessage = $state("");
   let deviceRequest = 0;
 
+  let downloads = $state<DownloadItem[]>([]);
+  let downloadDir = $state("");
+  let downloadsOpen = $state(false);
+  let downloadPrompts = $state<DownloadPrompt[]>([]);
+  let promptName = $state("");
+  let promptDir = $state("");
+  let promptBusy = $state(false);
+  let downloadPreviewVisible = $state(false);
+  let downloadPreviews = $state<Record<string, string>>({});
+  let copiedDownloadId = $state("");
+  let lastSeenDownloadKey = "";
+
   let view = $state<HTMLElement>();
   let tablist = $state<HTMLElement>();
   let nameField = $state<HTMLInputElement>();
+  let promptNameField = $state<HTMLInputElement>();
   let createButton = $state<HTMLButtonElement>();
 
   const busy = $derived(pending !== null);
   const active = $derived(model.tabs.find((tab) => tab.id === model.activeId) ?? null);
   const targetTab = $derived(model.tabs.find((tab) => tab.id === target) ?? null);
   const focusId = $derived(active?.id ?? model.tabs[0]?.id ?? "");
-  const isModalOpen = $derived(settingsOpen || form !== "none");
+  const currentPrompt = $derived(downloadPrompts[0] ?? null);
+  const activeDownloadCount = $derived(downloads.filter((item) => item.state === "active").length);
+  const latestDownload = $derived(downloads[0] ?? null);
+  const promptPreviewPath = $derived.by(() => {
+    if (!currentPrompt) return "";
+    const trimmed = promptName.trim() || currentPrompt.name;
+    if (trimmed === currentPrompt.name && promptDir === currentPrompt.dir) {
+      return currentPrompt.path;
+    }
+    return joinPath(promptDir, trimmed);
+  });
+  const isModalOpen = $derived(settingsOpen || form !== "none" || downloadsOpen || currentPrompt !== null);
 
   const reason = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  function joinPath(dir: string, file: string): string {
+    if (!dir) return file;
+    const sep = dir.includes("/") && !dir.includes("\\") ? "/" : "\\";
+    return dir.endsWith("\\") || dir.endsWith("/") ? `${dir}${file}` : `${dir}${sep}${file}`;
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
+  }
+
+  function fileKind(fileName: string): { badge: string; label: string; tone: string } {
+    const ext = fileName.includes(".") ? fileName.split(".").pop()?.toLowerCase() ?? "" : "";
+    if (["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].includes(ext)) {
+      return { badge: ext.toUpperCase() || "IMG", label: "Gambar", tone: "image" };
+    }
+    if (ext === "pdf") return { badge: "PDF", label: "Dokumen PDF", tone: "pdf" };
+    if (["mp4", "mkv", "mov", "webm", "avi"].includes(ext)) {
+      return { badge: ext.toUpperCase(), label: "Video", tone: "video" };
+    }
+    if (["mp3", "ogg", "opus", "wav", "m4a", "aac"].includes(ext)) {
+      return { badge: ext.toUpperCase(), label: "Audio", tone: "audio" };
+    }
+    if (["zip", "rar", "7z", "tar", "gz"].includes(ext)) {
+      return { badge: ext.toUpperCase(), label: "Arsip", tone: "archive" };
+    }
+    if (["doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "csv"].includes(ext)) {
+      return { badge: ext.toUpperCase(), label: "Dokumen", tone: "doc" };
+    }
+    return { badge: ext ? ext.slice(0, 4).toUpperCase() : "FILE", label: "Berkas", tone: "file" };
+  }
+
+  async function ensureDownloadPreview(item: DownloadItem) {
+    if (item.state !== "done" || item.id in downloadPreviews) return;
+    if (fileKind(item.name).tone !== "image") {
+      downloadPreviews = { ...downloadPreviews, [item.id]: "" };
+      return;
+    }
+    try {
+      const url = await Workspace.downloadPreview(item.id);
+      downloadPreviews = { ...downloadPreviews, [item.id]: url };
+    } catch {
+      downloadPreviews = { ...downloadPreviews, [item.id]: "" };
+    }
+  }
+
+  function applyDownloads(list: DownloadItem[], revealOnChange: boolean) {
+    downloads = list;
+    const head = list[0];
+    if (head) {
+      const nextKey = `${head.id}|${head.state}`;
+      if (revealOnChange && nextKey !== lastSeenDownloadKey) {
+        downloadPreviewVisible = true;
+      }
+      lastSeenDownloadKey = nextKey;
+      for (const item of list.slice(0, 8)) {
+        if (item.state === "done") void ensureDownloadPreview(item);
+      }
+    }
+    void Workspace.downloadDirectory()
+      .then((dir) => { if (dir) downloadDir = dir; })
+      .catch(() => {});
+  }
+
+  async function pickPromptFolder() {
+    if (promptBusy) return;
+    promptBusy = true;
+    try {
+      const chosen = await Workspace.pickDownloadDirectory(promptDir);
+      if (chosen) promptDir = chosen;
+    } catch (e) {
+      error = reason(e);
+    } finally {
+      promptBusy = false;
+    }
+  }
+
+  async function replyDownloadPrompt(accept: boolean) {
+    const prompt = currentPrompt;
+    if (!prompt || promptBusy) return;
+    promptBusy = true;
+    error = "";
+    try {
+      await Workspace.confirmDownload(
+        prompt.id,
+        accept,
+        accept ? promptDir : "",
+        accept ? (promptName.trim() || prompt.name) : "",
+      );
+      downloadPrompts = downloadPrompts.filter((item) => item.id !== prompt.id);
+      if (accept) downloadPreviewVisible = true;
+    } catch (e) {
+      error = reason(e);
+      downloadPrompts = downloadPrompts.filter((item) => item.id !== prompt.id);
+    } finally {
+      promptBusy = false;
+    }
+  }
+
+  async function openDownloadsModal() {
+    downloadsOpen = true;
+    error = "";
+    try {
+      const [list, dir] = await Promise.all([Workspace.downloads(), Workspace.downloadDirectory()]);
+      applyDownloads(list, false);
+      if (dir) downloadDir = dir;
+    } catch (e) {
+      error = reason(e);
+    }
+  }
+
+  async function changeDefaultDownloadDir() {
+    try {
+      const dir = await Workspace.chooseDownloadDirectory();
+      if (dir) downloadDir = dir;
+    } catch (e) {
+      error = reason(e);
+    }
+  }
+
+  async function openDownloadItem(id: string) {
+    try {
+      await Workspace.openDownload(id);
+    } catch (e) {
+      error = reason(e);
+    }
+  }
+
+  async function showDownloadItem(id: string) {
+    try {
+      await Workspace.showDownload(id);
+    } catch (e) {
+      error = reason(e);
+    }
+  }
+
+  async function copyDownloadPath(id: string, path: string) {
+    try {
+      await navigator.clipboard.writeText(path);
+      copiedDownloadId = id;
+      setTimeout(() => {
+        if (copiedDownloadId === id) copiedDownloadId = "";
+      }, 2000);
+    } catch (e) {
+      error = reason(e);
+    }
+  }
 
   async function run<T>(kind: Pending, fn: () => Promise<T>): Promise<T | undefined> {
     pending = kind;
@@ -180,6 +359,19 @@
     }
   });
 
+  // Sync download confirmation fields and focus filename when a prompt opens
+  $effect(() => {
+    const prompt = currentPrompt;
+    if (prompt) {
+      promptName = prompt.name;
+      promptDir = prompt.dir;
+      void tick().then(() => {
+        promptNameField?.focus();
+        promptNameField?.select();
+      });
+    }
+  });
+
   // Focus and select input field whenever create or rename modal opens
   $effect(() => {
     if (form === "create" || form === "rename") {
@@ -304,15 +496,32 @@
         target = null;
         name = "";
       }
+      downloadPrompts = downloadPrompts.filter((prompt) =>
+        next.tabs.some((tab) => tab.id === prompt.profileId),
+      );
     });
     const offError = events.workerError.on((text) => {
       error = text;
     });
+    const offDownloads = events.downloadsChanged.on((list) => {
+      applyDownloads(list, true);
+    });
+    const offDownloadPrompt = events.downloadPrompted.on((prompt) => {
+      if (!downloadPrompts.some((item) => item.id === prompt.id)) {
+        downloadPrompts = [...downloadPrompts, prompt];
+      }
+    });
     const onEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (form !== "none") {
+        if (currentPrompt !== null) {
+          e.preventDefault();
+          void replyDownloadPrompt(false);
+        } else if (form !== "none") {
           e.preventDefault();
           void closeForm();
+        } else if (downloadsOpen) {
+          e.preventDefault();
+          downloadsOpen = false;
         } else if (settingsOpen) {
           e.preventDefault();
           settingsOpen = false;
@@ -329,11 +538,25 @@
       const next = await run("startup", () => Workspace.state());
       if (next) model = next;
       loading = false;
+      try {
+        const [list, dir, pendingPrompts] = await Promise.all([
+          Workspace.downloads(),
+          Workspace.downloadDirectory(),
+          Workspace.pendingDownloads(),
+        ]);
+        applyDownloads(list, false);
+        if (dir) downloadDir = dir;
+        if (pendingPrompts.length) downloadPrompts = pendingPrompts;
+      } catch {
+        // Non-fatal on startup
+      }
     })();
 
     return () => {
       offState();
       offError();
+      offDownloads();
+      offDownloadPrompt();
       window.removeEventListener("keydown", onEscape);
       window.removeEventListener("resize", onResize);
     };
@@ -490,6 +713,23 @@
 
         <div class="toolbar-separator" aria-hidden="true"></div>
       {/if}
+
+      <button
+        class="toolbar-btn"
+        type="button"
+        disabled={busy}
+        aria-expanded={downloadsOpen}
+        onclick={openDownloadsModal}
+        title="Lihat daftar unduhan"
+      >
+        <svg class="t-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
+        </svg>
+        <span>Unduhan</span>
+        {#if activeDownloadCount > 0}
+          <span class="toolbar-count-pill">{activeDownloadCount}</span>
+        {/if}
+      </button>
 
       <button
         class="toolbar-btn toolbar-btn-settings"
@@ -983,6 +1223,211 @@
     </div>
   {/if}
 
+  <!-- DOWNLOAD CONFIRMATION MODAL -->
+  {#if currentPrompt}
+    {@const kind = fileKind(promptName.trim() || currentPrompt.name)}
+    <div class="modal-backdrop" role="presentation">
+      <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="download-confirm-title">
+        <div class="modal-header">
+          <div class="modal-header-info">
+            <div class="modal-icon-badge">
+              <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
+              </svg>
+            </div>
+            <div>
+              <h2 id="download-confirm-title" class="modal-title">Konfirmasi Unduhan</h2>
+              <p class="modal-subtitle">
+                Dari profil <strong>{currentPrompt.profileName || "WhatsApp"}</strong> · {currentPrompt.source}
+              </p>
+            </div>
+          </div>
+          <button
+            class="modal-close-btn"
+            type="button"
+            onclick={() => replyDownloadPrompt(false)}
+            disabled={promptBusy}
+            aria-label="Batalkan unduhan"
+            title="Batal (Esc)"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M3 3l10 10M13 3l-10 10" />
+            </svg>
+          </button>
+        </div>
+
+        <form onsubmit={(e) => { e.preventDefault(); void replyDownloadPrompt(true); }}>
+          <div class="modal-body download-confirm-body">
+            <div class="download-file-preview-card">
+              <div class="file-type-tile tone-{kind.tone}">{kind.badge}</div>
+              <div class="download-file-preview-meta">
+                <div class="download-file-preview-name" title={promptName.trim() || currentPrompt.name}>
+                  {promptName.trim() || currentPrompt.name}
+                </div>
+                <div class="download-file-preview-sub">{kind.label} · Siap diunduh</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="download-file-name" class="form-label">Nama Berkas</label>
+              <input
+                id="download-file-name"
+                class="modal-input"
+                bind:this={promptNameField}
+                bind:value={promptName}
+                maxlength="200"
+                autocomplete="off"
+                disabled={promptBusy}
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <div class="download-path-label-row">
+                <span class="form-label">Path Penyimpanan</span>
+                <button
+                  class="btn btn-secondary btn-xs"
+                  type="button"
+                  onclick={pickPromptFolder}
+                  disabled={promptBusy}
+                >
+                  Ubah Folder…
+                </button>
+              </div>
+              <div class="download-path-box" title={promptPreviewPath}>
+                <code>{promptPreviewPath}</code>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer">
+            <div class="modal-footer-btns">
+              <button class="btn btn-secondary" type="button" onclick={() => replyDownloadPrompt(false)} disabled={promptBusy}>
+                Cancel
+              </button>
+              <button class="btn btn-primary" type="submit" disabled={promptBusy}>
+                {promptBusy ? "Memproses…" : "Download"}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  {/if}
+
+  <!-- DOWNLOADS LIST MODAL -->
+  {#if downloadsOpen}
+    <div
+      class="modal-backdrop"
+      role="presentation"
+      onclick={(e) => { if (e.target === e.currentTarget) downloadsOpen = false; }}
+    >
+      <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="downloads-title">
+        <div class="modal-header">
+          <div class="modal-header-info">
+            <div class="modal-icon-badge">
+              <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
+              </svg>
+            </div>
+            <div class="downloads-header-meta">
+              <h2 id="downloads-title" class="modal-title">Daftar Unduhan</h2>
+              <p class="modal-subtitle" title={downloadDir}>
+                Folder default: <code>{downloadDir || "Belum ditentukan"}</code>
+              </p>
+            </div>
+          </div>
+          <button
+            class="modal-close-btn"
+            type="button"
+            onclick={() => (downloadsOpen = false)}
+            aria-label="Tutup daftar unduhan"
+            title="Tutup (Esc)"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M3 3l10 10M13 3l-10 10" />
+            </svg>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          {#if downloads.length === 0}
+            <div class="info-alert">
+              <p>Belum ada berkas yang diunduh pada sesi ini.</p>
+            </div>
+          {:else}
+            <div class="downloads-list">
+              {#each downloads as item (item.id)}
+                {@const kind = fileKind(item.name)}
+                {@const thumb = downloadPreviews[item.id]}
+                <div class="download-row">
+                  <div class="download-thumb">
+                    {#if thumb}
+                      <img src={thumb} alt={item.name} class="download-thumb-img" />
+                    {:else}
+                      <div class="file-type-tile tone-{kind.tone}">{kind.badge}</div>
+                    {/if}
+                  </div>
+                  <div class="download-row-info">
+                    <div class="download-row-top">
+                      <span class="download-row-name" title={item.name}>{item.name}</span>
+                      <span class="download-state-pill state-{item.state}">
+                        {#if item.state === "active"}
+                          Mengunduh… · {formatBytes(item.received)}
+                        {:else if item.state === "done"}
+                          Selesai · {formatBytes(item.received)}
+                        {:else}
+                          Gagal
+                        {/if}
+                      </span>
+                      <span class="download-profile-tag">{item.profileName}</span>
+                    </div>
+                    {#if item.path}
+                      <div class="download-row-path" title={item.path}>
+                        <code>{item.path}</code>
+                      </div>
+                    {/if}
+                    {#if item.error}
+                      <div class="download-row-error">{item.error}</div>
+                    {/if}
+                  </div>
+                  <div class="download-row-actions">
+                    {#if item.path}
+                      <button class="btn btn-secondary btn-xs" type="button" onclick={() => copyDownloadPath(item.id, item.path)}>
+                        {copiedDownloadId === item.id ? "Tersalin" : "Salin Path"}
+                      </button>
+                      <button class="btn btn-secondary btn-xs" type="button" onclick={() => showDownloadItem(item.id)}>
+                        Folder
+                      </button>
+                    {/if}
+                    {#if item.state === "done"}
+                      <button class="btn btn-primary btn-xs" type="button" onclick={() => openDownloadItem(item.id)}>
+                        Buka
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+
+        <div class="modal-footer">
+          {#if active}
+            <button class="btn btn-secondary" type="button" onclick={changeDefaultDownloadDir}>
+              Ubah Folder Default…
+            </button>
+          {/if}
+          <div class="modal-footer-btns">
+            <button class="btn btn-primary" type="button" onclick={() => (downloadsOpen = false)}>
+              Tutup
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
   <!-- Active Profile Viewport (Where native child window is placed) -->
   <div
     id="profile-view"
@@ -1018,4 +1463,75 @@
       </div>
     {/if}
   </div>
+
+  <!-- Live Download Preview & Path Shelf (outside #profile-view so HWND never covers it) -->
+  {#if downloadPreviewVisible && latestDownload}
+    {@const kind = fileKind(latestDownload.name)}
+    {@const thumb = downloadPreviews[latestDownload.id]}
+    <section class="download-preview-bar" aria-label="Preview Unduhan">
+      <div class="download-preview-left">
+        <div class="download-thumb">
+          {#if thumb}
+            <img src={thumb} alt={latestDownload.name} class="download-thumb-img" />
+          {:else}
+            <div class="file-type-tile tone-{kind.tone}">{kind.badge}</div>
+          {/if}
+        </div>
+        <div class="download-preview-details">
+          <div class="download-preview-top">
+            <strong class="download-preview-name" title={latestDownload.name}>{latestDownload.name}</strong>
+            <span class="download-state-pill state-{latestDownload.state}">
+              {#if latestDownload.state === "active"}
+                Mengunduh… · {formatBytes(latestDownload.received)}
+              {:else if latestDownload.state === "done"}
+                Selesai · {formatBytes(latestDownload.received)}
+              {:else}
+                Gagal{latestDownload.error ? `: ${latestDownload.error}` : ""}
+              {/if}
+            </span>
+            <span class="download-profile-tag">{latestDownload.profileName}</span>
+          </div>
+          {#if latestDownload.path}
+            <div class="download-preview-path" title={latestDownload.path}>
+              <span class="download-path-prefix">Path:</span>
+              <code>{latestDownload.path}</code>
+            </div>
+          {/if}
+        </div>
+      </div>
+      <div class="download-preview-actions">
+        {#if latestDownload.path}
+          <button
+            class="btn btn-secondary btn-xs"
+            type="button"
+            onclick={() => copyDownloadPath(latestDownload.id, latestDownload.path)}
+          >
+            {copiedDownloadId === latestDownload.id ? "Tersalin" : "Salin Path"}
+          </button>
+          <button class="btn btn-secondary btn-xs" type="button" onclick={() => showDownloadItem(latestDownload.id)}>
+            Tampilkan di Folder
+          </button>
+        {/if}
+        {#if latestDownload.state === "done"}
+          <button class="btn btn-primary btn-xs" type="button" onclick={() => openDownloadItem(latestDownload.id)}>
+            Buka
+          </button>
+        {/if}
+        <button class="btn btn-secondary btn-xs" type="button" onclick={openDownloadsModal}>
+          Semua
+        </button>
+        <button
+          class="modal-close-btn download-preview-close"
+          type="button"
+          onclick={() => (downloadPreviewVisible = false)}
+          aria-label="Tutup preview unduhan"
+          title="Tutup preview"
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M3 3l10 10M13 3l-10 10" />
+          </svg>
+        </button>
+      </div>
+    </section>
+  {/if}
 </div>

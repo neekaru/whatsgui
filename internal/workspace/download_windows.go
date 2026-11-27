@@ -2,7 +2,9 @@ package workspace
 
 import (
 	"cmp"
+	"encoding/base64"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,8 +39,22 @@ type DownloadItem struct {
 	StartedAt int64  `json:"startedAt"`
 }
 
+// DownloadPrompt asks the user whether to start or cancel a download.
+type DownloadPrompt struct {
+	ID          string `json:"id"`
+	ProfileID   string `json:"profileId"`
+	ProfileName string `json:"profileName"`
+	Name        string `json:"name"`
+	Dir         string `json:"dir"`
+	Path        string `json:"path"`
+	Source      string `json:"source"`
+}
+
 // DownloadsChanged sends the downloads of every profile after any change.
 var DownloadsChanged = mygo.NewEvent[[]DownloadItem]("downloadsChanged")
+
+// DownloadPrompted asks the UI to confirm or cancel an incoming download.
+var DownloadPrompted = mygo.NewEvent[DownloadPrompt]("downloadPrompted")
 
 // mergeDownload records a download a profile reported and tells the UI.
 func (w *Workspace) mergeDownload(profileID string, item profile.DownloadItem, dir string) {
@@ -219,4 +235,149 @@ func (w *Workspace) findDownload(id string) (DownloadItem, error) {
 		return DownloadItem{}, errors.New("unduhan tidak ditemukan")
 	}
 	return item, nil
+}
+
+func (w *Workspace) queueDownloadPrompt(profileID string, p profile.DownloadPrompt) {
+	profileName := ""
+	w.mu.Lock()
+	for _, tab := range w.data.Tabs {
+		if tab.ID == profileID {
+			profileName = tab.Name
+			break
+		}
+	}
+	w.mu.Unlock()
+
+	prompt := DownloadPrompt{
+		ID:          p.ID,
+		ProfileID:   profileID,
+		ProfileName: profileName,
+		Name:        p.Name,
+		Dir:         p.Dir,
+		Path:        p.Path,
+		Source:      p.Source,
+	}
+	w.dlMu.Lock()
+	if w.downloadPrompts == nil {
+		w.downloadPrompts = map[string]DownloadPrompt{}
+	}
+	w.downloadPrompts[prompt.ID] = prompt
+	w.dlMu.Unlock()
+
+	if w.window != nil {
+		go func() {
+			_ = DownloadPrompted.Emit(w.window, prompt)
+		}()
+	}
+}
+
+func (w *Workspace) clearDownloadPrompts(profileID string) {
+	w.dlMu.Lock()
+	for id, prompt := range w.downloadPrompts {
+		if prompt.ProfileID == profileID {
+			delete(w.downloadPrompts, id)
+		}
+	}
+	w.dlMu.Unlock()
+}
+
+// PendingDownloads returns any download confirmations currently waiting for the user.
+func (w *Workspace) PendingDownloads() []DownloadPrompt {
+	w.dlMu.Lock()
+	defer w.dlMu.Unlock()
+	list := make([]DownloadPrompt, 0, len(w.downloadPrompts))
+	for _, prompt := range w.downloadPrompts {
+		list = append(list, prompt)
+	}
+	slices.SortFunc(list, func(a, b DownloadPrompt) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	return list
+}
+
+// PickDownloadDirectory opens a folder picker for a pending download without
+// changing the profile's default folder unless confirmed.
+func (w *Workspace) PickDownloadDirectory(defaultDir string) (string, error) {
+	if strings.TrimSpace(defaultDir) == "" {
+		defaultDir = w.DownloadDirectory()
+	}
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:            w.window,
+		Title:             "Pilih folder tujuan unduhan",
+		ButtonLabel:       "Pilih folder",
+		Directory:         true,
+		CreateDirectories: true,
+		DefaultPath:       defaultDir,
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	return paths[0], nil
+}
+
+// ConfirmDownload accepts or cancels a pending download prompt.
+func (w *Workspace) ConfirmDownload(id string, accept bool, dir, name string) error {
+	w.dlMu.Lock()
+	prompt, ok := w.downloadPrompts[id]
+	if ok {
+		delete(w.downloadPrompts, id)
+	}
+	w.dlMu.Unlock()
+	if !ok {
+		return errors.New("permintaan unduhan tidak ditemukan atau sudah kedaluwarsa")
+	}
+
+	w.mu.Lock()
+	p := w.processes[prompt.ProfileID]
+	w.mu.Unlock()
+	if p == nil {
+		if !accept {
+			return nil
+		}
+		return errors.New("proses tab sudah tidak aktif")
+	}
+
+	return w.sendCommand(p, profile.Command{
+		Action: "downloadreply",
+		ID:     id,
+		Accept: accept,
+		Dir:    strings.TrimSpace(dir),
+		Name:   strings.TrimSpace(name),
+	})
+}
+
+// DownloadPreview returns a bounded data URL thumbnail for finished image downloads,
+// or "" for non-image, active, or oversized files.
+func (w *Workspace) DownloadPreview(id string) (string, error) {
+	item, err := w.findDownload(id)
+	if err != nil {
+		return "", err
+	}
+	if item.State != DownloadDone || item.Path == "" {
+		return "", nil
+	}
+	switch strings.ToLower(filepath.Ext(item.Path)) {
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
+	default:
+		return "", nil
+	}
+	const maxPreviewBytes = 5 << 20
+	info, err := os.Stat(item.Path)
+	if err != nil || info.IsDir() || info.Size() == 0 || info.Size() > maxPreviewBytes {
+		return "", nil
+	}
+	data, err := os.ReadFile(item.Path)
+	if err != nil {
+		return "", nil
+	}
+	mime := http.DetectContentType(data)
+	switch mime {
+	case "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp":
+		return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data), nil
+	default:
+		return "", nil
+	}
 }

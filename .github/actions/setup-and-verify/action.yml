@@ -1,0 +1,47 @@
+name: Setup and Verify
+description: Install toolchain dependencies, verify MyGo bindings, and run frontend/JS/Go checks.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@v6
+      with:
+        go-version-file: go.mod
+
+    - uses: actions/setup-node@v6
+      with:
+        node-version: "24"
+
+    - uses: oven-sh/setup-bun@v2
+
+    - name: Install dependencies
+      shell: bash
+      run: bun install --frozen-lockfile
+
+    - name: Verify generated MyGo bindings
+      shell: bash
+      run: |
+        bun run generate
+        git diff --exit-code src/mygo.ts
+
+    - name: Typecheck and build frontend
+      shell: bash
+      run: bun run build:web
+
+    - name: Run profile JS tests
+      shell: bash
+      run: node --test internal/profile/*.test.cjs
+
+    - name: Vet and test Go
+      shell: bash
+      env:
+        CGO_ENABLED: "0"
+      run: |
+        go vet ./...
+        go test ./...
+
+    - name: Cache NSIS
+      uses: actions/cache@v6
+      with:
+        path: ~\AppData\Local\mygo\nsis-*
+        key: nsis-${{ hashFiles('bun.lock') }}

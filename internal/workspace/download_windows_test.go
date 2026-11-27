@@ -1,6 +1,11 @@
 package workspace
 
 import (
+	"image"
+	"image/png"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"whatsappgui-new/internal/profile"
@@ -51,5 +56,53 @@ func TestDownloadsAreMergedPerProfile(t *testing.T) {
 	}
 	if _, err := w.findDownload("2"); err == nil {
 		t.Fatal("unduhan profil terhapus masih dapat dibuka")
+	}
+}
+
+func TestDownloadPromptAndPreview(t *testing.T) {
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "gambar.png")
+	f, err := os.Create(imgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewNRGBA(image.Rect(0, 0, 4, 4))); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+
+	txtPath := filepath.Join(dir, "catatan.txt")
+	if err := os.WriteFile(txtPath, []byte("halo"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Workspace{data: State{Tabs: []Tab{{ID: "a", Name: "Kerja"}}, ActiveID: "a"}}
+	w.queueDownloadPrompt("a", profile.DownloadPrompt{
+		ID: "p1", Name: "gambar.png", Dir: dir, Path: imgPath, Source: "web.whatsapp.com",
+	})
+	prompts := w.PendingDownloads()
+	if len(prompts) != 1 || prompts[0].ProfileName != "Kerja" || prompts[0].Path != imgPath {
+		t.Fatalf("prompt unduhan tidak tercatat: %+v", prompts)
+	}
+	w.clearDownloadPrompts("a")
+	if len(w.PendingDownloads()) != 0 {
+		t.Fatal("prompt unduhan tidak dibersihkan saat profil berhenti")
+	}
+
+	w.mergeDownload("a", profile.DownloadItem{
+		ID: "img1", Name: "gambar.png", Path: imgPath, State: DownloadDone, StartedAt: 100,
+	}, dir)
+	w.mergeDownload("a", profile.DownloadItem{
+		ID: "txt1", Name: "catatan.txt", Path: txtPath, State: DownloadDone, StartedAt: 200,
+	}, dir)
+
+	preview, err := w.DownloadPreview("img1")
+	if err != nil || !strings.HasPrefix(preview, "data:image/png;base64,") {
+		t.Fatalf("preview gambar tidak sesuai: %q %v", preview, err)
+	}
+	nonImgPreview, err := w.DownloadPreview("txt1")
+	if err != nil || nonImgPreview != "" {
+		t.Fatalf("berkas non-gambar seharusnya tidak menghasilkan data URL: %q %v", nonImgPreview, err)
 	}
 }

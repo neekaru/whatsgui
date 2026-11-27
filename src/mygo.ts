@@ -42,6 +42,17 @@ export interface DownloadItem {
   startedAt: number;
 }
 
+/** DownloadPrompt asks the user whether to start or cancel a download. */
+export interface DownloadPrompt {
+  id: string;
+  profileId: string;
+  profileName: string;
+  name: string;
+  dir: string;
+  path: string;
+  source: string;
+}
+
 /** MediaDevice is a microphone or camera of the profile. */
 export interface MediaDevice {
   id: string;
@@ -90,6 +101,8 @@ export const Workspace = {
    * Cookies, local storage and IndexedDB are kept, so the tab reopens signed in.
    */
   clearCache: bind<[], void>("Workspace.ClearCache", () => []),
+  /** ConfirmDownload accepts or cancels a pending download prompt. */
+  confirmDownload: bind<[string, boolean, string, string], void>("Workspace.ConfirmDownload", (id: string, accept: boolean, dir: string, name: string) => [id, accept, dir, name]),
   create: bind<[string], State>("Workspace.Create", (name: string) => [name]),
   /**
    * DNDActive reports whether popups are suppressed now, by the manual switch or
@@ -101,6 +114,11 @@ export const Workspace = {
    * "" while the profile has not reported it yet.
    */
   downloadDirectory: bind<[], string>("Workspace.DownloadDirectory", () => []),
+  /**
+   * DownloadPreview returns a bounded data URL thumbnail for finished image downloads,
+   * or "" for non-image, active, or oversized files.
+   */
+  downloadPreview: bind<[string], string>("Workspace.DownloadPreview", (id: string) => [id]),
   /** Downloads lists the downloads of every profile, newest first. */
   downloads: bind<[], DownloadItem[]>("Workspace.Downloads", () => []),
   /** GetDND returns the saved Do Not Disturb settings. */
@@ -122,6 +140,13 @@ export const Workspace = {
    * the page.
    */
   openDownload: bind<[string], void>("Workspace.OpenDownload", (id: string) => [id]),
+  /** PendingDownloads returns any download confirmations currently waiting for the user. */
+  pendingDownloads: bind<[], DownloadPrompt[]>("Workspace.PendingDownloads", () => []),
+  /**
+   * PickDownloadDirectory opens a folder picker for a pending download without
+   * changing the profile's default folder unless confirmed.
+   */
+  pickDownloadDirectory: bind<[string], string>("Workspace.PickDownloadDirectory", (defaultDir: string) => [defaultDir]),
   /** Quit shuts the profiles down and leaves the app, whatever the window shows. */
   quit: bind<[], void>("Workspace.Quit", () => []),
   reload: bind<[], void>("Workspace.Reload", () => []),
@@ -154,6 +179,8 @@ export const events = {
   dndChanged: event<DNDSettings>("dndChanged"),
   /** DownloadsChanged sends the downloads of every profile after any change. */
   downloadsChanged: event<DownloadItem[]>("downloadsChanged"),
+  /** DownloadPrompted asks the UI to confirm or cancel an incoming download. */
+  downloadPrompted: event<DownloadPrompt>("downloadPrompted"),
   workspaceChanged: event<State>("workspaceChanged"),
   workerError: event<string>("workerError"),
 } as const;
