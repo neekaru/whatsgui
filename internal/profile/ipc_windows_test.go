@@ -100,4 +100,12 @@ func TestMediaCommands(t *testing.T) {
 	if err != nil || cmd.Action != "userscripts" || len(cmd.Userscripts) != 1 {
 		t.Fatalf("userscripts payload besar ditolak: %+v %v", cmd, err)
 	}
+
+	if _, err := newConnection(strings.NewReader("{\"action\":\"sounds\"}\n"), io.Discard).receive(); err == nil {
+		t.Fatal("sounds tanpa payload diterima")
+	}
+	cmd, err = newConnection(strings.NewReader(`{"action":"sounds","sounds":{"message":{"mode":"preset","preset":"chime","volume":90},"call":{"mode":"mute","volume":100}}}`+"\n"), io.Discard).receive()
+	if err != nil || cmd.Action != "sounds" || cmd.Sounds == nil || cmd.Sounds.Message.Preset != "chime" || cmd.Sounds.Call.Mode != SoundModeMute {
+		t.Fatalf("perintah sounds valid ditolak: %+v %v", cmd, err)
+	}
 }

@@ -659,27 +659,14 @@
     </div>
   </header>
 
-  <!-- Clean, Organized Toolbar (Sub-Header) -->
+  <!-- Classic Compact Toolbar -->
   <div class="toolbar" aria-busy={busy}>
     <div class="profile-header">
-      <div class="profile-avatar" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-          <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/>
-        </svg>
-      </div>
-      <div class="profile-meta">
-        <div class="profile-title-row">
-          <h1 class="profile-title" title={active?.name}>{active?.name ?? "Tidak ada profil aktif"}</h1>
-          {#if active}
-            <span class="profile-badge">
-              <span class="badge-dot"></span>
-              <span>Aktif</span>
-            </span>
-            {#if active.unread > 0}
-              <span class="profile-unread-pill">{active.unread} belum dibaca</span>
-            {/if}
-          {/if}
-        </div>
+      <div class="profile-title-row">
+        <h1 class="profile-title" title={active?.name}>{active?.name ?? "Tidak ada profil aktif"}</h1>
+        {#if active && active.unread > 0}
+          <span class="profile-unread-pill">{active.unread} belum dibaca</span>
+        {/if}
       </div>
     </div>
 
@@ -837,19 +824,13 @@
       >
         <div class="modal-header">
           <div class="modal-header-info">
-            <div class="modal-icon-badge">
-              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="8" cy="8" r="2.5"/>
-                <path d="M13.5 8a5.5 5.5 0 0 0-.1-1l1.4-1.1-1.2-2.1-1.7.6a5.6 5.6 0 0 0-1.7-1l-.3-1.8H7.6l-.3 1.8a5.6 5.6 0 0 0-1.7 1L3.9 3.8 2.7 5.9l1.4 1.1a5.5 5.5 0 0 0 0 2L2.7 10.1l1.2 2.1 1.7-.6a5.6 5.6 0 0 0 1.7 1l.3 1.8h2.8l.3-1.8a5.6 5.6 0 0 0 1.7-1l1.7.6 1.2-2.1-1.4-1.1c.1-.3.1-.7.1-1z"/>
-              </svg>
-            </div>
             <div>
               <h2 id="settings-title" class="modal-title">Pengaturan</h2>
               <p class="modal-subtitle">
                 {#if active}
-                  Preferensi profil <strong>{active.name}</strong> dan konfigurasi aplikasi
+                  Profil <strong>{active.name}</strong> &amp; konfigurasi aplikasi
                 {:else}
-                  Preferensi aplikasi WhatsGUI
+                  Konfigurasi aplikasi WhatsGUI
                 {/if}
               </p>
             </div>
@@ -932,68 +913,28 @@
         <div class="modal-body">
           {#if settingsTab === "appearance"}
             <div class="settings-panel">
-              <div class="settings-card">
-                <div class="card-header">
-                  <h3 class="card-title">Tema Aplikasi</h3>
-                  <p class="card-desc">Pilih tema warna antarmuka yang paling nyaman untuk Anda.</p>
+              <fieldset class="prop-group">
+                <legend class="prop-group-legend">Tema Antarmuka</legend>
+                <div class="prop-row">
+                  <div class="prop-radio-group" role="radiogroup" aria-label="Pilih tema aplikasi">
+                    <label class="prop-radio">
+                      <input type="radio" name="app-theme" value="system" checked={theme === "system"} onchange={() => setTheme("system")} />
+                      <span>Ikuti Sistem (Windows)</span>
+                    </label>
+                    <label class="prop-radio">
+                      <input type="radio" name="app-theme" value="light" checked={theme === "light"} onchange={() => setTheme("light")} />
+                      <span>Terang</span>
+                    </label>
+                    <label class="prop-radio">
+                      <input type="radio" name="app-theme" value="dark" checked={theme === "dark"} onchange={() => setTheme("dark")} />
+                      <span>Gelap</span>
+                    </label>
+                  </div>
                 </div>
-                <div class="theme-options">
-                  <button
-                    type="button"
-                    class="theme-card"
-                    class:selected={theme === "system"}
-                    onclick={() => setTheme("system")}
-                  >
-                    <div class="theme-card-icon">
-                      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="2" y="3" width="20" height="14" rx="2" />
-                        <line x1="8" y1="21" x2="16" y2="21" />
-                        <line x1="12" y1="17" x2="12" y2="21" />
-                      </svg>
-                    </div>
-                    <span class="theme-card-label">Ikuti Sistem</span>
-                    <span class="theme-card-sub">Sinkron dengan OS Windows</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    class="theme-card"
-                    class:selected={theme === "light"}
-                    onclick={() => setTheme("light")}
-                  >
-                    <div class="theme-card-icon">
-                      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="5" />
-                        <line x1="12" y1="1" x2="12" y2="3" />
-                        <line x1="12" y1="21" x2="12" y2="23" />
-                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                        <line x1="1" y1="12" x2="3" y2="12" />
-                        <line x1="21" y1="12" x2="23" y2="12" />
-                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-                      </svg>
-                    </div>
-                    <span class="theme-card-label">Terang</span>
-                    <span class="theme-card-sub">Cerah dan bersih</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    class="theme-card"
-                    class:selected={theme === "dark"}
-                    onclick={() => setTheme("dark")}
-                  >
-                    <div class="theme-card-icon">
-                      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-                      </svg>
-                    </div>
-                    <span class="theme-card-label">Gelap</span>
-                    <span class="theme-card-sub">Nyaman di malam hari</span>
-                  </button>
+                <div class="prop-group-footer">
+                  <p class="prop-hint">Tema diterapkan ke jendela workspace sekaligus halaman WhatsApp Web.</p>
                 </div>
-              </div>
+              </fieldset>
             </div>
 
           {:else if settingsTab === "devices"}
@@ -1002,21 +943,17 @@
                 <div class="info-alert">
                   <p>Pilih profil terlebih dahulu untuk mengonfigurasi perangkat audio dan video.</p>
                 </div>
+              {:else if devicesLoading && !devices}
+                <div class="loading-state">
+                  <span class="loading-spinner"></span>
+                  <span>Mendeteksi perangkat audio dan video…</span>
+                </div>
               {:else}
-                <div class="settings-card">
-                  <div class="card-header">
-                    <h3 class="card-title">Perangkat Panggilan WhatsApp</h3>
-                    <p class="card-desc">Pilih mikrofon dan kamera yang digunakan saat melakukan panggilan.</p>
-                  </div>
+                <fieldset class="prop-group">
+                  <legend class="prop-group-legend">Perangkat Panggilan</legend>
 
-                  <div class="form-group">
-                    <label for="select-mic" class="form-label">
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1z"/>
-                        <path d="M3.5 6.5v1a4.5 4.5 0 0 0 9 0v-1M8 12v3M5.5 15h5"/>
-                      </svg>
-                      <span>Mikrofon</span>
-                    </label>
+                  <div class="prop-form-row">
+                    <label for="select-mic" class="form-label">Mikrofon</label>
                     <div class="select-wrapper">
                       <select id="select-mic" bind:value={audioId} disabled={busy || devicesLoading || !devices}>
                         <option value="">Default sistem Windows</option>
@@ -1030,14 +967,8 @@
                     </div>
                   </div>
 
-                  <div class="form-group">
-                    <label for="select-cam" class="form-label">
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M14.5 4.5L10 8l4.5 3.5v-7z"/>
-                        <rect x="1.5" y="3.5" width="8.5" height="9" rx="1.5"/>
-                      </svg>
-                      <span>Kamera</span>
-                    </label>
+                  <div class="prop-form-row">
+                    <label for="select-cam" class="form-label">Kamera</label>
                     <div class="select-wrapper">
                       <select id="select-cam" bind:value={videoId} disabled={busy || devicesLoading || !devices}>
                         <option value="">Default sistem Windows</option>
@@ -1051,40 +982,28 @@
                     </div>
                   </div>
 
-                  <div class="card-footer-actions">
-                    <button
-                      class="btn btn-primary"
-                      type="button"
-                      disabled={busy || devicesLoading || !devices}
-                      onclick={saveDevices}
-                    >
-                      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="3.5 8.5 6.5 11.5 12.5 4.5" />
-                      </svg>
-                      <span>Simpan Perangkat</span>
-                    </button>
-
-                    <button
-                      class="btn btn-secondary"
-                      type="button"
-                      disabled={busy || devicesLoading || !active}
-                      onclick={() => loadDevices(model.activeId)}
-                    >
-                      <svg class="t-icon {devicesLoading ? 'spin' : ''}" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M2.5 8a5.5 5.5 0 0 1 9.3-3.9L14 6.5M14 2v4.5H9.5M13.5 8a5.5 5.5 0 0 1-9.3 3.9L2 9.5M2 14v-4.5h4.5"/>
-                      </svg>
-                      <span>{devicesLoading ? "Mendeteksi…" : "Deteksi Ulang"}</span>
-                    </button>
+                  <div class="prop-group-footer">
+                    <span class="prop-hint">Jika perangkat dicabut, sistem kembali ke default.</span>
+                    <div class="prop-actions-right">
+                      <button
+                        class="btn btn-secondary"
+                        type="button"
+                        disabled={busy || devicesLoading || !active}
+                        onclick={() => loadDevices(model.activeId)}
+                      >
+                        {devicesLoading ? "Mendeteksi…" : "Deteksi Ulang"}
+                      </button>
+                      <button
+                        class="btn btn-primary"
+                        type="button"
+                        disabled={busy || devicesLoading || !devices}
+                        onclick={saveDevices}
+                      >
+                        Simpan Perangkat
+                      </button>
+                    </div>
                   </div>
-                </div>
-
-                <div class="info-alert">
-                  <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor">
-                    <circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/>
-                    <path d="M8 7v4M8 5h.01"/>
-                  </svg>
-                  <p>Kamera dapat menyala sesaat saat sistem mendeteksi perangkat keras yang tersedia. Jika perangkat yang tersimpan dicabut, sistem akan kembali memakai default.</p>
-                </div>
+                </fieldset>
               {/if}
             </div>
 
@@ -1100,80 +1019,72 @@
 
           {:else if settingsTab === "maintenance"}
             <div class="settings-panel">
-              <div class="settings-card">
-                <div class="card-header">
-                  <h3 class="card-title">Pembaruan Aplikasi (v{appVersion || "0.1.0"})</h3>
-                  <p class="card-desc">
-                    {#if updateInfo?.available}
-                      Versi terbaru <strong>v{updateInfo.latestVersion}</strong> tersedia di GitHub Releases.
-                    {:else}
-                      Periksa rilis terbaru secara otomatis dari GitHub Releases.
-                    {/if}
-                  </p>
-                </div>
-                <div class="card-footer-actions">
-                  <button
-                    class="btn btn-secondary"
-                    type="button"
-                    disabled={updateChecking || updateProgress?.stage === "downloading"}
-                    onclick={() => void checkForUpdates(true)}
-                  >
-                    <span>{updateChecking ? "Memeriksa…" : "Periksa Pembaruan"}</span>
-                  </button>
-                  {#if updateInfo?.available}
-                    <button
-                      class="btn btn-primary"
-                      type="button"
-                      disabled={updateProgress?.stage === "downloading" || updateProgress?.stage === "ready"}
-                      onclick={installAppUpdate}
-                    >
-                      <span>{updateInfo.canAutoInstall ? "Pasang & Mulai Ulang" : "Unduh Pembaruan"}</span>
-                    </button>
-                  {/if}
-                </div>
-              </div>
+              <fieldset class="prop-group">
+                <legend class="prop-group-legend">Pemeliharaan &amp; Diagnostik</legend>
 
-              <div class="settings-card">
-                <div class="card-header">
-                  <h3 class="card-title">Bersihkan Cache Profil</h3>
-                  <p class="card-desc">Menghapus file gambar, media unduhan sementara, dan cache skrip profil aktif. Sesi login WhatsApp Anda tetap aman dan tidak akan logout.</p>
+                <div class="prop-row">
+                  <div class="prop-row-info">
+                    <span class="prop-row-label">Pembaruan Aplikasi (v{appVersion || "0.1.0"})</span>
+                    <p class="prop-row-desc">
+                      {#if updateInfo?.available}
+                        Versi terbaru <strong>v{updateInfo.latestVersion}</strong> tersedia di GitHub Releases.
+                      {:else}
+                        Periksa rilis terbaru dari GitHub Releases.
+                      {/if}
+                    </p>
+                  </div>
+                  <div class="prop-actions-right">
+                    <button
+                      class="btn btn-secondary"
+                      type="button"
+                      disabled={updateChecking || updateProgress?.stage === "downloading"}
+                      onclick={() => void checkForUpdates(true)}
+                    >
+                      {updateChecking ? "Memeriksa…" : "Periksa"}
+                    </button>
+                    {#if updateInfo?.available}
+                      <button
+                        class="btn btn-primary"
+                        type="button"
+                        disabled={updateProgress?.stage === "downloading" || updateProgress?.stage === "ready"}
+                        onclick={installAppUpdate}
+                      >
+                        {updateInfo.canAutoInstall ? "Pasang & Mulai Ulang" : "Unduh"}
+                      </button>
+                    {/if}
+                  </div>
                 </div>
-                <div class="card-action-row">
+
+                <div class="prop-row">
+                  <div class="prop-row-info">
+                    <span class="prop-row-label">Bersihkan Cache Profil</span>
+                    <p class="prop-row-desc">Hapus cache media &amp; skrip profil aktif tanpa logout.</p>
+                  </div>
                   <button
                     class="btn btn-secondary"
                     type="button"
                     disabled={busy || !active}
                     onclick={clearCache}
                   >
-                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M3 4h10M6 4V2.5A1.5 1.5 0 0 1 7.5 1h1A1.5 1.5 0 0 1 10 2.5V4M12.5 4v9.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V4"/>
-                    </svg>
-                    <span>{pending === "cache" ? "Membersihkan…" : "Bersihkan Cache"}</span>
+                    {pending === "cache" ? "Membersihkan…" : "Bersihkan Cache"}
                   </button>
                 </div>
-              </div>
 
-              <div class="settings-card">
-                <div class="card-header">
-                  <h3 class="card-title">Alat Pengembang (Developer Tools)</h3>
-                  <p class="card-desc">Buka DevTools untuk inspeksi elemen, konsol log, dan diagnosis masalah webview.</p>
-                </div>
-                <div class="card-action-row">
+                <div class="prop-row">
+                  <div class="prop-row-info">
+                    <span class="prop-row-label">Alat Pengembang (DevTools)</span>
+                    <p class="prop-row-desc">Buka inspektor webview dan konsol profil aktif.</p>
+                  </div>
                   <button
                     class="btn btn-secondary"
                     type="button"
                     disabled={busy || !active}
                     onclick={() => run("devtools", () => Workspace.openDevTools())}
                   >
-                    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                      <polyline points="5 4 1 8 5 12"/>
-                      <polyline points="11 4 15 8 11 12"/>
-                      <line x1="9.5" y1="3" x2="6.5" y2="13"/>
-                    </svg>
-                    <span>Buka DevTools</span>
+                    Buka DevTools
                   </button>
                 </div>
-              </div>
+              </fieldset>
             </div>
           {/if}
         </div>
@@ -1208,18 +1119,13 @@
         {#if form === "create"}
           <div class="modal-header">
             <div class="modal-header-info">
-              <div class="modal-icon-badge">
-                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M8 2v12M2 8h12"/>
-                </svg>
-              </div>
               <div>
                 <h2 class="modal-title">Tambah Profil Baru</h2>
                 <p class="modal-subtitle">Setiap profil memiliki sesi login dan folder data mandiri.</p>
               </div>
             </div>
             <button class="modal-close-btn" type="button" onclick={() => closeForm()} aria-label="Batal" title="Batal (Esc)">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                 <path d="M3 3l10 10M13 3l-10 10" />
               </svg>
             </button>
@@ -1253,18 +1159,13 @@
         {:else if form === "rename"}
           <div class="modal-header">
             <div class="modal-header-info">
-              <div class="modal-icon-badge">
-                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11.5 2.5a1.77 1.77 0 0 1 2.5 2.5L5 14l-3.5 1 1-3.5 9-9z"/>
-                </svg>
-              </div>
               <div>
                 <h2 class="modal-title">Ganti Nama Profil</h2>
                 <p class="modal-subtitle">Ubah nama profil yang ditampilkan di bilah tab.</p>
               </div>
             </div>
             <button class="modal-close-btn" type="button" onclick={() => closeForm()} aria-label="Batal" title="Batal (Esc)">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                 <path d="M3 3l10 10M13 3l-10 10" />
               </svg>
             </button>
@@ -1297,18 +1198,13 @@
         {:else if form === "delete"}
           <div class="modal-header">
             <div class="modal-header-info">
-              <div class="modal-icon-badge danger">
-                <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M3 4h10M6 4V2.5A1.5 1.5 0 0 1 7.5 1h1A1.5 1.5 0 0 1 10 2.5V4M12.5 4v9.5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5V4"/>
-                </svg>
-              </div>
               <div>
                 <h2 class="modal-title">Hapus Profil?</h2>
                 <p class="modal-subtitle">Tindakan ini permanen dan tidak dapat dibatalkan.</p>
               </div>
             </div>
             <button class="modal-close-btn" type="button" onclick={() => closeForm()} aria-label="Batal" title="Batal (Esc)">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                 <path d="M3 3l10 10M13 3l-10 10" />
               </svg>
             </button>
@@ -1375,18 +1271,10 @@
       </div>
     {:else if !model.tabs.length}
       <div class="empty">
-        <div class="empty-icon-circle">
-          <svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor">
-            <path d="M12.04 2c-5.46 0-9.91 4.45-9.91 9.91 0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91 0-2.65-1.03-5.14-2.9-7.01A9.82 9.82 0 0 0 12.04 2z"/>
-          </svg>
-        </div>
         <h2>Belum Ada Profil WhatsApp</h2>
         <p>Mulai dengan menambahkan profil WhatsApp pertama Anda. Setiap profil memiliki sesi akun terpisah.</p>
         <button class="btn btn-primary btn-lg" type="button" onclick={() => openForm("create")} disabled={busy}>
-          <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M8 2v12M2 8h12"/>
-          </svg>
-          <span>Buat Profil Pertama</span>
+          Buat Profil Pertama
         </button>
       </div>
     {:else if !active}

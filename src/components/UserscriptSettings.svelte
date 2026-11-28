@@ -205,27 +205,29 @@
   {/if}
 
   {#if editingId !== null}
-    <form class="settings-card userscript-editor-card" onsubmit={saveEditor}>
-      <div class="card-header">
-        <h3 class="card-title">{editingId === "" ? "Buat Userscript Baru" : `Edit ${editingId}`}</h3>
-        <p class="card-desc">Mendukung header standar <code>// ==UserScript==</code> (<code>@name</code>, <code>@description</code>, <code>@version</code>, <code>@match</code>).</p>
+    <form class="prop-group" onsubmit={saveEditor}>
+      <div class="prop-row-info">
+        <span class="prop-row-label">{editingId === "" ? "Buat Userscript Baru" : `Edit ${editingId}`}</span>
+        <p class="prop-row-desc">Mendukung header <code>// ==UserScript==</code> (<code>@name</code>, <code>@description</code>, <code>@version</code>, <code>@match</code>).</p>
       </div>
       <textarea
         class="userscript-code-input"
         bind:value={editorCode}
-        rows="12"
+        rows="11"
         spellcheck="false"
         disabled={busy}
         aria-label="Kode userscript JavaScript"
         required
       ></textarea>
-      <div class="card-footer-actions">
-        <button class="btn btn-primary" type="submit" disabled={busy}>
-          <span>{busy ? "Menyimpan…" : "Simpan & Terapkan"}</span>
-        </button>
-        <button class="btn btn-secondary" type="button" onclick={cancelEdit} disabled={busy}>
-          <span>Batal</span>
-        </button>
+      <div class="prop-group-footer">
+        <div class="prop-actions-right">
+          <button class="btn btn-secondary" type="button" onclick={cancelEdit} disabled={busy}>
+            Batal
+          </button>
+          <button class="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? "Menyimpan…" : "Simpan & Terapkan"}
+          </button>
+        </div>
       </div>
     </form>
   {:else if loading}
@@ -233,29 +235,38 @@
       <p>Memuat daftar userscript…</p>
     </div>
   {:else if scripts.length === 0}
-    <div class="settings-card">
-      <div class="card-header">
-        <h3 class="card-title">Belum Ada Userscript</h3>
-        <p class="card-desc">
-          Tambahkan skrip JavaScript kustom untuk berjalan di halaman WhatsApp Web (<code>https://web.whatsapp.com/*</code>). Anda bisa mengimpor berkas <code>.user.js</code>, menulis skrip baru, atau memasang contoh bawaan.
-        </p>
+    <fieldset class="prop-group">
+      <legend class="prop-group-legend">Belum Ada Userscript</legend>
+      <p class="prop-hint">
+        Tambahkan skrip JavaScript kustom untuk halaman WhatsApp Web (<code>https://web.whatsapp.com/*</code>) lewat impor berkas <code>.user.js</code>, tulis baru, atau pasang contoh bawaan.
+      </p>
+      <div class="prop-group-footer">
+        <div class="prop-actions-right">
+          <button class="btn btn-primary" type="button" onclick={() => void installExample("wa-audio-stickers.user.js", "Stiker Audio")} disabled={busy}>
+            Pasang Contoh: Stiker Audio
+          </button>
+          <button class="btn btn-secondary" type="button" onclick={() => void installExample("privacy-blur-toggle.user.js", "Privacy Blur")} disabled={busy}>
+            Pasang Contoh: Privacy Blur
+          </button>
+        </div>
       </div>
-      <div class="card-footer-actions">
-        <button class="btn btn-primary" type="button" onclick={() => void installExample("wa-audio-stickers.user.js", "Stiker Audio")} disabled={busy}>
-          <span>Pasang Contoh: Stiker Audio</span>
-        </button>
-        <button class="btn btn-secondary" type="button" onclick={() => void installExample("privacy-blur-toggle.user.js", "Privacy Blur")} disabled={busy}>
-          <span>Pasang Contoh: Privacy Blur</span>
-        </button>
-      </div>
-    </div>
+    </fieldset>
   {:else}
     <div class="userscripts-list">
       {#each scripts as script (script.id)}
-        <div class="userscript-card">
+        <div class="userscript-row">
           <div class="userscript-info">
             <div class="userscript-title-row">
-              <span class="userscript-name">{script.name}</span>
+              <label class="prop-check">
+                <input
+                  type="checkbox"
+                  checked={script.enabled}
+                  disabled={busy}
+                  aria-label={`Aktifkan ${script.name}`}
+                  onchange={(e) => void toggleScript(script, e.currentTarget.checked)}
+                />
+                <span class="userscript-name">{script.name}</span>
+              </label>
               {#if script.version}
                 <span class="userscript-badge">v{script.version}</span>
               {/if}
@@ -275,16 +286,6 @@
           </div>
 
           <div class="userscript-controls">
-            <label class="switch" title={script.enabled ? "Nonaktifkan" : "Aktifkan"}>
-              <input
-                type="checkbox"
-                checked={script.enabled}
-                disabled={busy}
-                aria-label={`Aktifkan ${script.name}`}
-                onchange={(e) => void toggleScript(script, e.currentTarget.checked)}
-              />
-              <span class="slider"></span>
-            </label>
             <button class="btn btn-secondary btn-xs" type="button" onclick={() => startEdit(script)} disabled={busy}>
               Edit
             </button>

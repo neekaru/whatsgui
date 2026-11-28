@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         WhatsApp Privacy Blur Toggle
 // @namespace    whatsgui
-// @version      1.0.0
+// @version      1.1.0
 // @description  Menambahkan tombol cepat dan pintasan Alt+B untuk memburamkan daftar chat serta header agar privasi terjaga saat berbagi layar.
 // @author       WhatsApp GUI Example
 // @match        https://web.whatsapp.com/*
@@ -32,23 +32,21 @@
     }
     #${BTN_ID} {
       position: fixed;
-      right: 16px;
-      bottom: 16px;
+      top: 12px;
+      right: 96px;
       z-index: 99999;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      height: 32px;
-      padding: 0 12px;
-      border: 1px solid rgba(134, 150, 160, 0.35);
-      border-radius: 9999px;
-      background: rgba(17, 27, 33, 0.88);
-      color: #e9edef;
-      font: 600 12px/1 "Segoe UI", system-ui, sans-serif;
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid rgba(134, 150, 160, 0.45);
+      border-radius: 3px;
+      background: rgba(22, 27, 33, 0.92);
+      color: #e6edf3;
+      font: 600 11.5px/1 "Segoe UI", Tahoma, sans-serif;
       cursor: pointer;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-      backdrop-filter: blur(6px);
-      transition: background-color 0.15s ease, border-color 0.15s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
     }
     #${BTN_ID}:hover {
       background: rgba(32, 44, 51, 0.95);

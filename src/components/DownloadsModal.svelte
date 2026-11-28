@@ -37,11 +37,6 @@
   <div class="modal modal-lg" role="dialog" aria-modal="true" aria-labelledby="downloads-title">
     <div class="modal-header">
       <div class="modal-header-info">
-        <div class="modal-icon-badge">
-          <svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
-          </svg>
-        </div>
         <div class="downloads-header-meta">
           <h2 id="downloads-title" class="modal-title">Daftar Unduhan</h2>
           <p class="modal-subtitle" title={downloadDir}>

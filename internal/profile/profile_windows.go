@@ -37,6 +37,9 @@ var appearanceScript string
 //go:embed scripts/notification.js
 var notificationScript string
 
+//go:embed scripts/sound.js
+var soundScript string
+
 //go:embed scripts/media.js
 var mediaScript string
 
@@ -48,17 +51,21 @@ var unreadScript string
 
 // preloadScript runs in every WhatsApp page: the main window and call popups.
 // Appearance is seeded with the workspace selection before WhatsApp boots.
-var preloadScript = passiveEventsScript + "\n" + appearanceScript + "\n" + notificationScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
+var preloadScript = passiveEventsScript + "\n" + appearanceScript + "\n" + notificationScript + "\n" + soundScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
 
 type worker struct {
 	conn             *connection
 	page             *mygo.Page
+	pagesMu          sync.Mutex
+	pages            map[*mygo.Page]struct{}
 	ctx              context.Context
 	downloads        *downloadManager
 	pendingDownloads sync.Map
 	mainReady        atomic.Bool
 	themeMu          sync.Mutex
 	theme            string
+	soundsMu         sync.Mutex
+	sounds           NotificationSoundsPayload
 	userscriptsMu    sync.Mutex
 	userscripts      []UserscriptPayload
 	gm               *gmStorage
@@ -91,7 +98,14 @@ func Run(name string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer os.Stdin.Close()
-	w := &worker{conn: conn, ctx: ctx, theme: start.Theme, userscripts: start.Userscripts, name: name}
+	sounds := NotificationSoundsPayload{
+		Message: NotificationSoundChannel{Mode: SoundModeDefault, Preset: MessageSoundPresets[0], Volume: 100},
+		Call:    NotificationSoundChannel{Mode: SoundModeDefault, Preset: CallSoundPresets[0], Volume: 100},
+	}
+	if start.Sounds != nil {
+		sounds = *start.Sounds
+	}
+	w := &worker{conn: conn, pages: map[*mygo.Page]struct{}{}, ctx: ctx, theme: start.Theme, sounds: sounds, userscripts: start.Userscripts, name: name}
 	// Keep the process identity stable while routing all data to one root.
 	mygo.App.SetName(name)
 	root := os.Getenv(EnvProfileData)
@@ -135,7 +149,7 @@ func pruneLegacySkeleton(name string) {
 
 func (w *worker) open(cancel context.CancelFunc) {
 	// Popup pages need the same origin and permission policy before navigation.
-	mygo.App.OnWindowCreated(func(win *mygo.Window) { w.configurePage(win.Page()) })
+	mygo.App.OnWindowCreated(func(win *mygo.Window) { w.configureWindow(win) })
 	win := mygo.NewWindow(mygo.WindowOptions{
 		Title: "WhatsApp", Width: 1100, Height: 700,
 		Hidden: true, Frameless: true, SkipTaskbar: true,
@@ -171,6 +185,19 @@ func (w *worker) open(cancel context.CancelFunc) {
 		w.report(err)
 	}
 	go w.readCommands()
+}
+
+func (w *worker) configureWindow(win *mygo.Window) {
+	page := win.Page()
+	w.pagesMu.Lock()
+	w.pages[page] = struct{}{}
+	w.pagesMu.Unlock()
+	win.OnClosed(func() {
+		w.pagesMu.Lock()
+		delete(w.pages, page)
+		w.pagesMu.Unlock()
+	})
+	w.configurePage(page)
 }
 
 func (w *worker) configurePage(page *mygo.Page) {
@@ -227,6 +254,13 @@ func (w *worker) readCommands() {
 			w.userscripts = slices.Clone(cmd.Userscripts)
 			w.userscriptsMu.Unlock()
 			go w.applyUserscripts("")
+		case "sounds":
+			if cmd.Sounds != nil {
+				w.soundsMu.Lock()
+				w.sounds = *cmd.Sounds
+				w.soundsMu.Unlock()
+				go w.applySounds()
+			}
 		case "click":
 			token, err := json.Marshal(cmd.Token)
 			if err != nil {
@@ -320,10 +354,15 @@ func (w *worker) preload() string {
 	if w.gm != nil {
 		gmSnapshot = w.gm.snapshotJSON()
 	}
+	w.soundsMu.Lock()
+	soundsJSON, _ := json.Marshal(w.sounds)
+	w.soundsMu.Unlock()
 	var out strings.Builder
 	out.WriteString("window.__workspaceAppearance = {theme: ")
 	out.Write(value)
-	out.WriteString("};\nwindow.__workspaceGMStorage = ")
+	out.WriteString("};\nwindow.__workspaceNotificationSounds = ")
+	out.Write(soundsJSON)
+	out.WriteString(";\nwindow.__workspaceGMStorage = ")
 	out.WriteString(gmSnapshot)
 	out.WriteString(";\n")
 	out.WriteString(gmRuntimeScript)
@@ -340,6 +379,24 @@ func (w *worker) preload() string {
 		}
 	}
 	return out.String()
+}
+
+func (w *worker) applySounds() {
+	w.soundsMu.Lock()
+	soundsJSON, _ := json.Marshal(w.sounds)
+	w.soundsMu.Unlock()
+	w.pagesMu.Lock()
+	pages := make([]*mygo.Page, 0, len(w.pages))
+	for page := range w.pages {
+		pages = append(pages, page)
+	}
+	w.pagesMu.Unlock()
+	script := "window.__workspaceApplyNotificationSounds?.(" + string(soundsJSON) + ")"
+	for _, page := range pages {
+		ctx, cancel := context.WithTimeout(w.ctx, 5*time.Second)
+		_, _ = page.EvalContext(ctx, script)
+		cancel()
+	}
 }
 
 func (w *worker) applyTheme() {

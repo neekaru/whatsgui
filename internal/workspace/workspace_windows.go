@@ -108,6 +108,7 @@ type Workspace struct {
 	downloadDirs    map[string]string
 	downloadPrompts map[string]DownloadPrompt
 	userscripts     *userscriptStore
+	sounds          *notificationSoundStore
 	updater         *updaterState
 }
 
@@ -133,6 +134,7 @@ func openWorkspace() (*Workspace, error) {
 		processes:   make(map[string]*profileProcess),
 		tray:        newTrayState(filepath.Join(dir, "dnd.json")),
 		userscripts: newUserscriptStore(filepath.Join(dir, "userscripts"), filepath.Join(dir, "userscripts.json")),
+		sounds:      newNotificationSoundStore(filepath.Join(dir, "notification-sounds.json"), filepath.Join(dir, "sounds")),
 		updater:     newUpdaterState(),
 	}
 	if err := w.loadDND(); err != nil {
@@ -611,7 +613,12 @@ func (w *Workspace) start(id string) error {
 	}
 	p.job = job
 	payloads, _ := w.activeUserscriptPayloads()
-	if err := w.sendCommand(p, profile.Command{Action: "start", Theme: w.theme, Userscripts: payloads}); err != nil {
+	var soundPayload *profile.NotificationSoundsPayload
+	if w.sounds != nil {
+		sp := w.sounds.payload()
+		soundPayload = &sp
+	}
+	if err := w.sendCommand(p, profile.Command{Action: "start", Theme: w.theme, Userscripts: payloads, Sounds: soundPayload}); err != nil {
 		job.Close()
 		input.Close()
 		cmd.Wait()
@@ -805,6 +812,9 @@ func (w *Workspace) notify(id string, msg profile.Message) error {
 	// page, only the popup and its sound are dropped.
 	if w.DNDActive() {
 		return nil
+	}
+	if w.sounds != nil && w.sounds.payload().Message.Mode != profile.SoundModeDefault {
+		msg.Silent = true
 	}
 	if w.showNotify == nil && !mygo.NotificationsSupported() {
 		return errors.New("notifikasi sistem tidak tersedia")

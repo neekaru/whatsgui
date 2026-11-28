@@ -73,8 +73,9 @@ type Command struct {
 	Theme       string              `json:"theme"`
 	Dir         string              `json:"dir"`
 	Name        string              `json:"name,omitempty"`
-	Accept      bool                `json:"accept,omitempty"`
-	Userscripts []UserscriptPayload `json:"userscripts,omitempty"`
+	Accept      bool                       `json:"accept,omitempty"`
+	Userscripts []UserscriptPayload        `json:"userscripts,omitempty"`
+	Sounds      *NotificationSoundsPayload `json:"sounds,omitempty"`
 }
 
 // One reader owns stdin; the encoder is shared by page callbacks and bound methods.
@@ -86,7 +87,7 @@ type connection struct {
 
 func newConnection(input io.Reader, output io.Writer) *connection {
 	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 32*1024*1024)
 	return &connection{input: scanner, output: json.NewEncoder(output)}
 }
 
@@ -144,6 +145,10 @@ func (c *connection) receive() (Command, error) {
 	case "userscripts":
 		if !validUserscripts(cmd.Userscripts) {
 			return cmd, errors.New("daftar userscript tidak valid")
+		}
+	case "sounds":
+		if cmd.Sounds == nil {
+			return cmd, errors.New("pengaturan suara notifikasi tidak valid")
 		}
 	case "setdownloaddir":
 		if len(cmd.Dir) > 1024 || strings.ContainsRune(cmd.Dir, 0) {

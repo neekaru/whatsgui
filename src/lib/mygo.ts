@@ -70,6 +70,19 @@ export interface MediaSettings {
   videoId: string;
 }
 
+export interface NotificationSoundChoice {
+  mode: string;
+  preset?: string;
+  fileName?: string;
+  mimeType?: string;
+  volume: number;
+}
+
+export interface NotificationSoundSettings {
+  message: NotificationSoundChoice;
+  call: NotificationSoundChoice;
+}
+
 export interface State {
   tabs: Tab[];
   activeId: string;
@@ -144,10 +157,17 @@ export const Workspace = {
    */
   chooseDownloadDirectory: bind<[], string>("Workspace.ChooseDownloadDirectory", () => []),
   /**
+   * ChooseNotificationSound opens a file picker to import a custom audio file for
+   * incoming messages ("message") or incoming calls ("call").
+   */
+  chooseNotificationSound: bind<[string], NotificationSoundSettings>("Workspace.ChooseNotificationSound", (kind: string) => [kind]),
+  /**
    * ClearCache clears the downloaded web content of the active profile only.
    * Cookies, local storage and IndexedDB are kept, so the tab reopens signed in.
    */
   clearCache: bind<[], void>("Workspace.ClearCache", () => []),
+  /** ClearNotificationSound removes a custom audio file and restores the default sound. */
+  clearNotificationSound: bind<[string], NotificationSoundSettings>("Workspace.ClearNotificationSound", (kind: string) => [kind]),
   /** ConfirmDownload accepts or cancels a pending download prompt. */
   confirmDownload: bind<[string, boolean, string, string], void>("Workspace.ConfirmDownload", (id: string, accept: boolean, dir: string, name: string) => [id, accept, dir, name]),
   create: bind<[string], State>("Workspace.Create", (name: string) => [name]),
@@ -172,6 +192,8 @@ export const Workspace = {
   downloads: bind<[], DownloadItem[]>("Workspace.Downloads", () => []),
   /** GetDND returns the saved Do Not Disturb settings. */
   getDND: bind<[], DNDSettings>("Workspace.GetDND", () => []),
+  /** GetNotificationSounds returns the workspace notification sound configuration. */
+  getNotificationSounds: bind<[], NotificationSoundSettings>("Workspace.GetNotificationSounds", () => []),
   /** ImportUserscripts opens a file picker for .user.js/.js files and imports them. */
   importUserscripts: bind<[], Userscript[]>("Workspace.ImportUserscripts", () => []),
   /** InstallExampleUserscript installs a bundled example userscript for WhatsApp Web. */
@@ -187,6 +209,8 @@ export const Workspace = {
    * is the only place the real devices exist.
    */
   mediaDevices: bind<[], MediaSettings>("Workspace.MediaDevices", () => []),
+  /** NotificationSoundPreview returns a data URL for testing the saved custom audio file. */
+  notificationSoundPreview: bind<[string], string>("Workspace.NotificationSoundPreview", (kind: string) => [kind]),
   /**
    * OpenDevTools opens the web inspector of the active profile, also in builds
    * made for release.
@@ -226,6 +250,8 @@ export const Workspace = {
    * every call it makes, popups included, uses it.
    */
   setMediaDevices: bind<[string, string], void>("Workspace.SetMediaDevices", (audioID: string, videoID: string) => [audioID, videoID]),
+  /** SetNotificationSounds saves and applies notification sound settings to all profiles. */
+  setNotificationSounds: bind<[NotificationSoundSettings], void>("Workspace.SetNotificationSounds", (settings: NotificationSoundSettings) => [settings]),
   /** SetTheme applies the workspace theme to all WhatsApp profiles. */
   setTheme: bind<[string], void>("Workspace.SetTheme", (theme: string) => [theme]),
   /** SetUserscriptEnabled toggles whether a userscript runs in WhatsApp profiles. */
@@ -251,6 +277,8 @@ export const events = {
   downloadUpdated: event<DownloadItem>("downloadUpdated"),
   /** DownloadPrompted asks the UI to confirm or cancel an incoming download. */
   downloadPrompted: event<DownloadPrompt>("downloadPrompted"),
+  /** NotificationSoundsChanged notifies the UI when notification sound settings change. */
+  notificationSoundsChanged: event<NotificationSoundSettings>("notificationSoundsChanged"),
   /** UpdateAvailable notifies the UI when a startup check finds a newer version. */
   updateAvailable: event<UpdateInfo>("updateAvailable"),
   /** UpdateProgressChanged notifies the UI during in-app update download and install. */
