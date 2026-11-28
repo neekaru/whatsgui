@@ -15,7 +15,7 @@
       } catch (e) { /* aún cargando */ }
       await new Promise((r) => setTimeout(r, 1000));
     }
-    throw new Error("WhatsApp Web no terminó de cargar en 3 minutos (¿sesión cerrada o código cambiado?)");
+    throw new Error("WhatsApp Web tidak selesai dimuat dalam 3 menit (apakah sesi belum login?)");
   }
 
   (async () => {

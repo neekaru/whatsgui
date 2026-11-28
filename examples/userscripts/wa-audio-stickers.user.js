@@ -28,9 +28,11 @@
 
   function isDarkTheme() {
     try {
-      return document.body.classList.contains("dark") ||
-        document.documentElement.classList.contains("dark") ||
-        window.matchMedia("(prefers-color-scheme: dark)").matches;
+      if (document.body.classList.contains("dark") || document.documentElement.classList.contains("dark")) return true;
+      const saved = localStorage.getItem("theme");
+      if (saved === '"light"' || saved === "light") return false;
+      if (saved === '"dark"' || saved === "dark") return true;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
     } catch (_) {
       return false;
     }

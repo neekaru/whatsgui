@@ -33,7 +33,7 @@
   const te = new TextEncoder();
 
   function checkAbort(signal) {
-    if (signal && signal.aborted) throw new DOMException("Cancelado por el usuario", "AbortError");
+    if (signal && signal.aborted) throw new DOMException("Dibatalkan oleh pengguna", "AbortError");
   }
 
   // ---------------------------------------------------------------- video
@@ -170,7 +170,7 @@
         if (last && !last.used) last.bmpPromise.then((b) => b.close());
         last = snap(v);
         if (pendingFirst) { for (let i = 0; i < pendingFirst; i++) slots[i] = last; last.used = true; pendingFirst = 0; }
-        if (onProgress && presented % 10 === 0) onProgress(`Leyendo cuadros ${next}/${n}`, next / n);
+        if (onProgress && presented % 10 === 0) onProgress(`Membaca frame ${next}/${n}`, next / n);
         if (next >= n || mt >= tEnd || v.ended) return finish();
         v.requestVideoFrameCallback(cb);
       };
@@ -197,7 +197,7 @@
       const s = snap(v);
       s.used = true;
       slots.push(s);
-      if (onProgress && (i % 5 === 0 || i === n - 1)) onProgress(`Leyendo cuadros ${i + 1}/${n}`, (i + 1) / n);
+      if (onProgress && (i % 5 === 0 || i === n - 1)) onProgress(`Membaca frame ${i + 1}/${n}`, (i + 1) / n);
     }
     return { slots, presented: n };
   }
@@ -208,7 +208,7 @@
     const t0 = performance.now();
     let v = await loadVideo(file);
     try {
-      if (!v.videoWidth || !v.videoHeight) throw new Error("El video no tiene imagen (¿es solo audio?)");
+      if (!v.videoWidth || !v.videoHeight) throw new Error("Video tidak memiliki gambar (apakah hanya audio?)");
       const offset = v._waasOffset || 0;
       const methods = method === "reproduccion" ? ["reproduccion", "saltos"] : ["saltos", "reproduccion"];
       let res, metodo;
@@ -260,9 +260,9 @@
   }
 
   async function openDecoder(file) {
-    if (typeof ImageDecoder === "undefined") throw new Error("Este navegador no puede leer GIF animados (falta ImageDecoder). Usa Chrome o Edge actualizados.");
+    if (typeof ImageDecoder === "undefined") throw new Error("Browser ini tidak mendukung pembacaan GIF animasi (ImageDecoder tidak tersedia).");
     const type = imageType(file);
-    if (!(await ImageDecoder.isTypeSupported(type))) throw new Error("El navegador no puede leer imágenes " + type);
+    if (!(await ImageDecoder.isTypeSupported(type))) throw new Error("Browser tidak dapat membaca gambar bertipe " + type);
     const dec = new ImageDecoder({ data: await file.arrayBuffer(), type });
     await dec.completed;
     await dec.tracks.ready;
@@ -321,7 +321,7 @@
         const s = snap(image);
         image.close();
         byIndex.set(needed[j], { bmp: await s.bmpPromise, fp: s.fp });
-        if (onProgress && (j % 5 === 0 || j === needed.length - 1)) onProgress(`Leyendo cuadros del GIF ${j + 1}/${needed.length}`, (j + 1) / needed.length);
+        if (onProgress && (j % 5 === 0 || j === needed.length - 1)) onProgress(`Membaca frame GIF ${j + 1}/${needed.length}`, (j + 1) / needed.length);
       }
     } finally {
       dec.close();
@@ -334,7 +334,7 @@
   // Imagen fija (JPG, PNG, WebP…). En un GIF se toma el primer cuadro.
   async function probeImage(file) {
     let bmp;
-    try { bmp = await createImageBitmap(file); } catch (e) { throw new Error("El navegador no pudo leer la imagen (" + (e && e.message ? e.message : e) + ")"); }
+    try { bmp = await createImageBitmap(file); } catch (e) { throw new Error("Browser tidak dapat membaca gambar (" + (e && e.message ? e.message : e) + ")"); }
     const out = { width: bmp.width, height: bmp.height, animated: false };
     bmp.close();
     if (isAnimationFile(file) && typeof ImageDecoder !== "undefined") {
@@ -527,7 +527,7 @@
         prevF = f;
         if (prev && sameBytes(prev.payload, enc.payload)) prev.durationMs += p[k].durationMs;
         else out.push({ payload: enc.payload, hasAlpha: enc.hasAlpha, durationMs: p[k].durationMs });
-        if (onProgress && k % 10 === 0) onProgress(`Codificando (${side} px, ${fps} fps, calidad ${Math.round(q * 100)}) ${k + 1}/${p.length}`, (k + 1) / p.length);
+        if (onProgress && k % 10 === 0) onProgress(`Mengenkode (${side} px, ${fps} fps, kualitas ${Math.round(q * 100)}) ${k + 1}/${p.length}`, (k + 1) / p.length);
       }
       // Compensación de desfase: el primer cuadro se muestra syncMs más, para que la imagen espere al audio.
       if (syncMs > 0 && !still) out[0] = { ...out[0], durationMs: out[0].durationMs + syncMs };
@@ -538,7 +538,7 @@
     }
     log("info", "webp:intentos", { side, fps, intentos: attempts });
     if (!best || best.bytes.length > MAX_STICKER_BYTES) {
-      throw new Error(`No cabe en 1 MB ni con la calidad mínima (${Math.round(best.bytes.length / 1000)} KB). Elige menos fps o menos resolución.`);
+      throw new Error(`Tidak muat di bawah 1 MB bahkan pada kualitas minimum (${Math.round(best.bytes.length / 1000)} KB). Pilih FPS atau resolusi lebih rendah.`);
     }
     return best;
   }
@@ -569,7 +569,7 @@
           const dctx = new OfflineAudioContext(1, SAMPLE_RATE, SAMPLE_RATE);
           return await dctx.decodeAudioData(buf);
         } catch (e) {
-          const err = new Error("No se pudo leer el audio. ¿El archivo tiene sonido? (" + (e && e.message ? e.message : e) + ")");
+          const err = new Error("Gagal membaca audio. Pastikan berkas memiliki trek suara. (" + (e && e.message ? e.message : e) + ")");
           err.cause = e;
           throw err;
         }
@@ -622,7 +622,7 @@
   }
 
   async function encodeOpus(pcm, bitrate = 32000) {
-    if (typeof AudioEncoder === "undefined") throw new Error("Este navegador no tiene WebCodecs (AudioEncoder). Usa Chrome o Edge actualizados.");
+    if (typeof AudioEncoder === "undefined") throw new Error("WebCodecs (AudioEncoder) tidak tersedia di browser ini.");
     const base = { codec: "opus", sampleRate: SAMPLE_RATE, numberOfChannels: 1, bitrate };
     const candidates = [
       { ...base, bitrateMode: "variable", opus: { frameDuration: 20000, complexity: 10, application: "voip", signal: "voice" } },
@@ -633,7 +633,7 @@
     for (const c of candidates) {
       try { if ((await AudioEncoder.isConfigSupported(c)).supported) { config = c; break; } } catch (e) { /* probar siguiente */ }
     }
-    if (!config) throw new Error("El navegador no puede codificar Opus con WebCodecs");
+    if (!config) throw new Error("Browser tidak dapat mengenkode audio Opus dengan WebCodecs");
     const packets = [];
     let description = null;
     let encError = null;
@@ -809,11 +809,11 @@
     if (visual.kind === "image") {
       // Un solo cuadro que dura todo el audio: no hay combinaciones de fps que elegir.
       log("info", "analizar:parametros", { tipo: "imagen", archivo: visual.file.name, bytes: visual.file.size, duracionAudio: audio.dur, modo: mode });
-      prog("Leyendo la imagen…", 0.3);
+      prog("Memuat gambar…", 0.3);
       const f = await captureImage(visual.file, SIDE, mode);
       const cells = SIDES.map((side) => ({ side, fps: 1, estado: "ok", score: side }));
       const an = { ...base, frames: [f], captureFps: 1, captureSide: SIDE, distinct: { 1: 1 }, cells, auto: cells[0], ms: Math.round(performance.now() - t0) };
-      prog("Imagen lista", 1);
+      prog("Gambar siap", 1);
       return an;
     }
 
@@ -860,7 +860,7 @@
         for (const f of sample) { checkAbort(signal); sum += (await encodeStaticFrame(f.bmp, q, canvas, ctx)).payload.length; }
         sampleBytes[side][q] = sum / sample.length;
       }
-      prog("Calculando opciones…", 0.8 + (0.2 * ++done) / sides.length);
+      prog("Menghitung opsi…", 0.8 + (0.2 * ++done) / sides.length);
     }
     const overhead = 32; // cabecera ANMF + chunk
     const cells = [];
@@ -880,7 +880,7 @@
       auto: auto && { side: auto.side, fps: auto.fps, est: auto.est, estado: auto.estado },
       caben: cells.filter((c) => c.estado === "ok").length, conMenosCalidad: cells.filter((c) => c.estado === "baja").length,
     });
-    prog("Opciones listas", 1);
+    prog("Opsi siap", 1);
     return an;
   }
 
@@ -892,7 +892,7 @@
 
   // Paso 2: codifica el audio y el sticker con la combinación elegida.
   async function create(an, { side, fps, syncMs = 0, still = false, audio = null, onProgress, signal, packName = "", publisher = "" }) {
-    if (!an || !an.frames) throw new Error("Primero calcula las opciones del tramo");
+    if (!an || !an.frames) throw new Error("Hitung opsi segmen terlebih dahulu");
     syncMs = Math.max(0, Math.min(1000, Math.round(+syncMs || 0)));
     still = !!still && an.visual.kind === "image";
     const prog = onProgress || (() => {});
@@ -901,26 +901,26 @@
     // El audio puede cambiar después del análisis sin recalcular: con "independiente" no afecta a los cuadros.
     const A = audio || an.audio;
     if (an.visual.kind === "image" || an.fit !== "independiente") {
-      if (Math.abs(A.dur - an.audio.dur) > 0.002) throw new Error("La duración del audio cambió: vuelve a calcular las opciones");
+      if (Math.abs(A.dur - an.audio.dur) > 0.002) throw new Error("Durasi audio berubah: hitung ulang opsi terlebih dahulu");
     }
     const cell = an.cells.find((c) => c.side === side && c.fps === fps);
     log("info", "crear:parametros", { side, fps, compensacionMs: syncMs, estatico: still, estimado: cell && cell.est, estado: cell && cell.estado });
 
     // Audio: la tasa de bits baja en clips largos para no pasar de 1 MB (límite de WhatsApp).
     const bitrate = Math.max(12000, Math.min(32000, Math.floor((0.9 * MAX_AUDIO_BYTES * 8) / A.dur)));
-    if ((bitrate / 8) * A.dur > 0.97 * MAX_AUDIO_BYTES) throw new Error(`Con ${Math.round(A.dur)} s el audio no cabe en 1 MB (límite de WhatsApp). Máximo unos ${Math.floor((0.9 * MAX_AUDIO_BYTES * 8) / 12000 / 60)} minutos.`);
-    prog("Extrayendo audio…", 0);
+    if ((bitrate / 8) * A.dur > 0.97 * MAX_AUDIO_BYTES) throw new Error(`Dengan durasi ${Math.round(A.dur)} dtk, audio melebihi batas 1 MB WhatsApp.`);
+    prog("Mengekstrak audio…", 0);
     // Un audio aparte se corta donde el usuario quiera: se suaviza el corte para evitar clics.
     const pcm = await extractAudio(A.file, A.start, A.dur, A.file !== an.visual.file ? 8 : 0);
     checkAbort(signal);
-    prog("Codificando audio…", 0.05);
+    prog("Mengenkode audio…", 0.05);
     const { packets, preSkip, config } = await encodeOpus(pcm, bitrate);
     const ogg = buildOggOpus(packets, preSkip, pcm.length);
-    if (ogg.length > MAX_AUDIO_BYTES) throw new Error(`El audio pesa ${Math.round(ogg.length / 1000)} KB (máximo 1000 KB)`);
+    if (ogg.length > MAX_AUDIO_BYTES) throw new Error(`Ukuran audio ${Math.round(ogg.length / 1000)} KB (maksimum 1000 KB)`);
     const soundSha = await sha256b64(ogg);
     const oggCheck = await verifyOgg(ogg);
     log(oggCheck.ok ? "info" : "error", "audio:ogg", { bytes: ogg.length, paquetes: packets.length, preSkip, config, verificacion: oggCheck, soundSha256: soundSha });
-    if (!oggCheck.ok) throw new Error("El audio generado no se puede reproducir: " + oggCheck.error);
+    if (!oggCheck.ok) throw new Error("Audio yang dihasilkan tidak dapat diputar: " + oggCheck.error);
 
     const exifMeta = await stickerMeta({ packName, publisher, soundSha });
     const w = await encodeWebp(an, side, fps, exifMeta, { onProgress: prog, signal, syncMs, still });
@@ -933,7 +933,7 @@
       msTotal: Math.round(performance.now() - t0),
     };
     log("info", "crear:resultado", info);
-    prog("Listo", 1);
+    prog("Selesai", 1);
     return { webp: new Blob([w.bytes], { type: "image/webp" }), ogg: new Blob([ogg], { type: "audio/ogg; codecs=opus" }), info };
   }
 

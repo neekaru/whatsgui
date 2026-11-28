@@ -234,7 +234,7 @@
       filehash, size: stickerAudio.size, duration: seconds,
       isCompleteStickerAudio: complete,
     });
-    if (complete !== true) throw new Error("WhatsApp no considera válido el audio subido (isCompleteStickerAudio=" + complete + ")");
+    if (complete !== true) throw new Error("WhatsApp menganggap audio yang diunggah tidak valid (isCompleteStickerAudio=" + complete + ")");
     return stickerAudio;
   };
 
@@ -260,7 +260,7 @@
       ack: msg ? msg.ack : null,
     };
     log(resumen.ok ? "info" : "error", "envio:resultado", resumen);
-    if (!resumen.ok) throw new Error("WhatsApp no pudo enviar el sticker (" + resumen.resultado + ")");
+    if (!resumen.ok) throw new Error("WhatsApp gagal mengirim stiker (" + resumen.resultado + ")");
     return msg;
   };
 
@@ -270,7 +270,7 @@
     while (Date.now() - t0 < timeoutMs) {
       const a = msg.ack;
       if (a >= ACK.SENT) { log("info", "envio:ack", { ack: a, ms: Date.now() - t0 }); return a; }
-      if (a < 0) throw new Error("El mensaje quedó en estado de error (ack " + a + ")");
+      if (a < 0) throw new Error("Pesan gagal dikirim (ack " + a + ")");
       await new Promise((r) => setTimeout(r, 300));
     }
     log("warn", "envio:ack-tiempo-agotado", { ack: msg.ack });
@@ -303,18 +303,18 @@
   W.publish = async function ({ webp, ogg, info }, { destino = "propio", abrirReenviar = true, onProgress } = {}) {
     const prog = onProgress || (() => {});
     W.hookWALogger();
-    if (!W.forceSoundStickers()) log("warn", "publicar:gating", "No se pudo activar la opción de stickers con sonido; el audio podría descartarse");
-    prog("Buscando chat…");
+    if (!W.forceSoundStickers()) log("warn", "publicar:gating", "Gagal mengaktifkan fitur stiker bersuara; audio mungkin terabaikan");
+    prog("Mencari chat tujuan…");
     const chat = destino === "abierto" ? W.getActiveChat() : await W.getSelfChat();
-    if (!chat) throw new Error(destino === "abierto" ? "Abre primero un chat" : "No se encontró tu chat propio");
-    prog("Subiendo audio…");
+    if (!chat) throw new Error(destino === "abierto" ? "Buka chat terlebih dahulu" : "Chat Anda sendiri tidak ditemukan");
+    prog("Mengunggah audio…");
     const stickerAudio = await W.uploadAudio(ogg, info.segundosAudio, chat);
-    prog("Enviando sticker…");
+    prog("Mengirim stiker…");
     const msg = await W.sendSticker(chat, webp, info, stickerAudio);
     if (abrirReenviar) {
-      prog("Esperando confirmación del servidor…");
+      prog("Menunggu konfirmasi server…");
       await W.waitForAck(msg);
-      prog("Abriendo Reenviar…");
+      prog("Membuka dialog Teruskan…");
       await W.openForward(msg);
     }
     return { chat, msg };
