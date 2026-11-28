@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "whatsappgui-new",
+      "name": "whatsgui",
       "dependencies": {
         "mygo-runtime": "^0.10.0",
       },

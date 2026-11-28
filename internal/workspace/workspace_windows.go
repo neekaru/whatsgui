@@ -111,6 +111,18 @@ func openWorkspace() (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
+	oldName := legacyAppName(mygo.App.Name())
+	var oldUserData, oldLocalData string
+	var appMigrated bool
+	if oldName != "" {
+		oldUserData = filepath.Join(filepath.Dir(dir), oldName)
+		oldLocalData = legacyProfileDirectory(oldName)
+		newLocalData := legacyProfileDirectory(mygo.App.Name())
+		appMigrated, err = migrateAppStorage(oldUserData, dir, oldLocalData, newLocalData)
+		if err != nil {
+			return nil, fmt.Errorf("memigrasi data versi lama: %w", err)
+		}
+	}
 	w := &Workspace{
 		file:        filepath.Join(dir, "tabs.json"),
 		processes:   make(map[string]*profileProcess),
@@ -127,7 +139,15 @@ func openWorkspace() (*Workspace, error) {
 	if errors.Is(err, os.ErrNotExist) {
 		w.data = State{Tabs: []Tab{newTab("WhatsApp 1")}}
 		w.data.ActiveID = w.data.Tabs[0].ID
-		return w, w.save(w.data)
+		if err := w.save(w.data); err != nil {
+			return nil, err
+		}
+		if oldName != "" {
+			if exePath, exeErr := os.Executable(); exeErr == nil {
+				maybeUninstallLegacyApp(exePath, appMigrated, oldUserData, dir, oldLocalData, readWindowsUninstallEntry, runSilentUninstaller)
+			}
+		}
+		return w, nil
 	}
 	if err != nil {
 		return nil, err
@@ -168,6 +188,11 @@ func openWorkspace() (*Workspace, error) {
 	for _, tab := range w.data.Tabs {
 		if err := w.migrateProfile(tab.ID); err != nil {
 			return nil, err
+		}
+	}
+	if oldName != "" {
+		if exePath, exeErr := os.Executable(); exeErr == nil {
+			maybeUninstallLegacyApp(exePath, appMigrated, oldUserData, dir, oldLocalData, readWindowsUninstallEntry, runSilentUninstaller)
 		}
 	}
 	return w, nil

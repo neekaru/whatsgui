@@ -25,8 +25,9 @@ function resolveVersion(): string {
 const updatePublicKey = process.env.MYGO_UPDATER_PUBLIC_KEY?.trim();
 
 export default defineConfig({
-  name: "whatsappgui-new",
-  identifier: "com.example.whatsappguinew",
+  name: "WhatsGUI",
+  slug: "whatsgui",
+  identifier: "io.github.neekaru.whatsgui",
   version: resolveVersion(),
   // `mygo dev` runs devCommand and loads devUrl; `mygo build` runs
   // buildCommand and embeds frontendDist into the app.
@@ -36,6 +37,10 @@ export default defineConfig({
   frontendDist: "dist",
   bindings: "src/lib/mygo.ts",
   out: "build",
+  windows: {
+    displayName: "WhatsGUI",
+    installDirName: "WhatsGUI",
+  },
   ...(updatePublicKey
     ? {
         updates: {

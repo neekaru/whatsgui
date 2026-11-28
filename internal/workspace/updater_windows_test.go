@@ -45,8 +45,8 @@ func TestFetchLatestGitHubReleaseAndAssetSelection(t *testing.T) {
 					"html_url": "https://github.com/neekaru/whatsgui/releases/tag/v0.2.0",
 					"assets": [
 						{"name": "whatsgui-windows-amd64.zip", "browser_download_url": "https://example.com/app.zip"},
-						{"name": "whatsappgui-new-setup-0.2.0-amd64.exe", "browser_download_url": "https://example.com/setup-amd64.exe"},
-						{"name": "whatsappgui-new-setup-0.2.0-arm64.exe", "browser_download_url": "https://example.com/setup-arm64.exe"}
+						{"name": "whatsgui-setup-0.2.0-amd64.exe", "browser_download_url": "https://example.com/setup-amd64.exe"},
+						{"name": "whatsgui-setup-0.2.0-arm64.exe", "browser_download_url": "https://example.com/setup-arm64.exe"}
 					]
 				}`)),
 			}, nil
@@ -58,7 +58,7 @@ func TestFetchLatestGitHubReleaseAndAssetSelection(t *testing.T) {
 		t.Fatalf("fetchLatestGitHubRelease: %v", err)
 	}
 	name, url := pickReleaseAsset(rel.Assets, "amd64")
-	if name != "whatsappgui-new-setup-0.2.0-amd64.exe" || url != "https://example.com/setup-amd64.exe" {
+	if name != "whatsgui-setup-0.2.0-amd64.exe" || url != "https://example.com/setup-amd64.exe" {
 		t.Fatalf("picked = (%q, %q)", name, url)
 	}
 }

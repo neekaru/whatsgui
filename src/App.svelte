@@ -849,7 +849,7 @@
                 {#if active}
                   Preferensi profil <strong>{active.name}</strong> dan konfigurasi aplikasi
                 {:else}
-                  Preferensi aplikasi WhatsApp GUI
+                  Preferensi aplikasi WhatsGUI
                 {/if}
               </p>
             </div>

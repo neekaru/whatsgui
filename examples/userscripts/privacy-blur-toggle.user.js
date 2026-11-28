@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         WhatsApp Privacy Blur Toggle
-// @namespace    whatsappgui-new
+// @namespace    whatsgui
 // @version      1.0.0
 // @description  Menambahkan tombol cepat dan pintasan Alt+B untuk memburamkan daftar chat serta header agar privasi terjaga saat berbagi layar.
 // @author       WhatsApp GUI Example

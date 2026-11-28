@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Stiker Audio WhatsApp (WA-audio-stickers)
-// @namespace    whatsappgui-new
+// @namespace    whatsgui
 // @version      0.7.2
 // @description  Menambahkan pilihan Stiker Biasa atau Stiker Audio saat menekan tombol Buat (ic-add) di panel stiker WhatsApp Web.
 // @author       Shirtep (extension) & WhatsApp GUI
