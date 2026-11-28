@@ -143,8 +143,14 @@
 
   async function installExample(id: string, label: string) {
     await runAction(async () => {
+      const existed = scripts.some((s) => s.id === id);
       scripts = await Workspace.installExampleUserscript(id);
-      showStatus(`Contoh userscript (${label}) berhasil dipasang & diaktifkan.`);
+      if (existed) needsReload = true;
+      showStatus(
+        existed
+          ? `Contoh userscript (${label}) diperbarui. Muat ulang tab untuk menerapkan.`
+          : `Contoh userscript (${label}) berhasil dipasang & diaktifkan.`,
+      );
     });
   }
 
@@ -290,23 +296,17 @@
       {/each}
     </div>
 
-    {#if !scripts.some((s) => s.id === "wa-audio-stickers.user.js") || !scripts.some((s) => s.id === "privacy-blur-toggle.user.js")}
-      <div class="userscripts-example-bar">
-        <span>Pasang contoh userscript bawaan:</span>
-        <div class="userscripts-actions-right">
-          {#if !scripts.some((s) => s.id === "wa-audio-stickers.user.js")}
-            <button class="btn btn-secondary btn-xs" type="button" onclick={() => void installExample("wa-audio-stickers.user.js", "Stiker Audio")} disabled={busy}>
-              Stiker Audio
-            </button>
-          {/if}
-          {#if !scripts.some((s) => s.id === "privacy-blur-toggle.user.js")}
-            <button class="btn btn-secondary btn-xs" type="button" onclick={() => void installExample("privacy-blur-toggle.user.js", "Privacy Blur")} disabled={busy}>
-              Privacy Blur
-            </button>
-          {/if}
-        </div>
+    <div class="userscripts-example-bar">
+      <span>Contoh bawaan (pasang / perbarui):</span>
+      <div class="userscripts-actions-right">
+        <button class="btn btn-secondary btn-xs" type="button" onclick={() => void installExample("wa-audio-stickers.user.js", "Stiker Audio")} disabled={busy}>
+          {scripts.some((s) => s.id === "wa-audio-stickers.user.js") ? "Perbarui Stiker Audio" : "Stiker Audio"}
+        </button>
+        <button class="btn btn-secondary btn-xs" type="button" onclick={() => void installExample("privacy-blur-toggle.user.js", "Privacy Blur")} disabled={busy}>
+          {scripts.some((s) => s.id === "privacy-blur-toggle.user.js") ? "Perbarui Privacy Blur" : "Privacy Blur"}
+        </button>
       </div>
-    {/if}
+    </div>
   {/if}
 
   {#if needsReload && hasActiveProfile}

@@ -29,9 +29,9 @@
   }
   async function load(name, timeoutMs = 15000) {
     try { return ns(name); } catch (e) { /* puede ser un módulo diferido */ }
-    if (typeof window.requireLazy !== "function") throw new Error(`Módulo ${name} no disponible y no hay requireLazy`);
+    if (typeof window.requireLazy !== "function") throw new Error(`Modul ${name} tidak tersedia dan requireLazy tidak ditemukan`);
     await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error(`Tiempo agotado cargando el módulo ${name}`)), timeoutMs);
+      const t = setTimeout(() => reject(new Error(`Waktu habis saat memuat modul ${name}`)), timeoutMs);
       window.requireLazy([name], () => { clearTimeout(t); resolve(); });
     });
     return ns(name);
@@ -171,7 +171,7 @@
         if (c) { log("info", "chat-propio:encontrado", { via: g, chat: describeChat(c) }); return c; }
       } catch (e) { /* siguiente */ }
     }
-    if (!firstWid) throw new Error("No se pudo obtener tu propio número");
+    if (!firstWid) throw new Error("Tidak dapat membaca nomor WhatsApp Anda");
     const r = await ns("WAWebFindChatAction").findOrCreateLatestChat(firstWid, "forwardSelectedModals");
     const chat = r && (r.chat || r);
     log("info", "chat-propio:creado", { chat: describeChat(chat) });

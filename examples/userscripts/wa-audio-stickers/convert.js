@@ -44,7 +44,7 @@
       v.playsInline = true;
       v.preload = "auto";
       const url = URL.createObjectURL(file);
-      const timer = setTimeout(() => reject(new Error("Tiempo agotado cargando el video")), 30000);
+      const timer = setTimeout(() => reject(new Error("Waktu habis saat memuat video")), 30000);
       v.onloadeddata = async () => {
         clearTimeout(timer);
         // Algunos videos recortados conservan marcas de tiempo que no empiezan en 0
@@ -74,7 +74,7 @@
       v.onerror = () => {
         clearTimeout(timer);
         const e = v.error;
-        reject(new Error("El navegador no pudo leer el video" + (e ? ` (código ${e.code}: ${e.message || "formato no soportado"})` : "")));
+        reject(new Error("Browser gagal membaca video" + (e ? ` (kode ${e.code}: ${e.message || "format tidak didukung"})` : "")));
       };
       v.src = url;
       v._waasUrl = url;
@@ -84,7 +84,7 @@
   function seek(v, t) {
     return new Promise((resolve, reject) => {
       if (Math.abs(v.currentTime - t) < 0.0005 && v.readyState >= 2) return resolve();
-      const timer = setTimeout(() => { v.removeEventListener("seeked", done); reject(new Error(`Tiempo agotado buscando el segundo ${t.toFixed(2)}`)); }, 8000);
+      const timer = setTimeout(() => { v.removeEventListener("seeked", done); reject(new Error(`Waktu habis saat mencari detik ke-${t.toFixed(2)}`)); }, 8000);
       function done() { clearTimeout(timer); resolve(); }
       v.addEventListener("seeked", done, { once: true });
       v.currentTime = t;
@@ -131,7 +131,7 @@
   // Es mucho más rápida que saltar cuadro por cuadro en videos largos.
   function captureByPlayback(v, t0, dur, fps, side, mode, onProgress, signal) {
     return new Promise((resolve, reject) => {
-      if (typeof v.requestVideoFrameCallback !== "function") return reject(new Error("sin requestVideoFrameCallback"));
+      if (typeof v.requestVideoFrameCallback !== "function") return reject(new Error("requestVideoFrameCallback tidak didukung"));
       const n = Math.max(1, Math.round(dur * fps));
       const T = Array.from({ length: n }, (_, k) => t0 + (k + 0.5) / fps);
       const tEnd = t0 + dur;
@@ -141,7 +141,7 @@
       // El elemento se adjunta al documento (casi invisible) para que Chrome componga sus cuadros.
       v.style.cssText = "position:fixed;right:0;bottom:0;width:4px;height:4px;opacity:0.01;pointer-events:none;z-index:-1";
       document.body.appendChild(v);
-      let watchdog = setTimeout(() => finish(new Error("La reproducción no entregó cuadros")), 4000);
+      let watchdog = setTimeout(() => finish(new Error("Pemutaran video tidak menghasilkan frame")), 4000);
       const finish = (err) => {
         if (done) return;
         done = true;
@@ -158,9 +158,9 @@
       };
       const cb = (now, meta) => {
         if (done) return;
-        if (signal && signal.aborted) return finish(new DOMException("Cancelado por el usuario", "AbortError"));
+        if (signal && signal.aborted) return finish(new DOMException("Dibatalkan oleh pengguna", "AbortError"));
         clearTimeout(watchdog);
-        watchdog = setTimeout(() => finish(new Error("La reproducción se detuvo")), 4000);
+        watchdog = setTimeout(() => finish(new Error("Pemutaran video terhenti")), 4000);
         presented++;
         const mt = meta.mediaTime;
         // Los puntos de muestreo anteriores a este cuadro pertenecen al cuadro previo.
@@ -371,7 +371,7 @@
   function readChunks(bytes) {
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const tag = (o) => String.fromCharCode(bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]);
-    if (tag(0) !== "RIFF" || tag(8) !== "WEBP") throw new Error("El canvas no devolvió un WebP válido");
+    if (tag(0) !== "RIFF" || tag(8) !== "WEBP") throw new Error("Canvas tidak menghasilkan berkas WebP yang valid");
     const chunks = [];
     let i = 12;
     while (i + 8 <= bytes.length) {
@@ -407,10 +407,10 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     const blob = await canvas.convertToBlob({ type: "image/webp", quality });
-    if (blob.type !== "image/webp") throw new Error("Este navegador no puede generar WebP (devolvió " + blob.type + "). Usa Chrome o Edge.");
+    if (blob.type !== "image/webp") throw new Error("Browser tidak mendukung pembuatan WebP (hasil: " + blob.type + ").");
     const bytes = new Uint8Array(await blob.arrayBuffer());
     const parts = readChunks(bytes).filter((c) => c.fourcc === "ALPH" || c.fourcc === "VP8 " || c.fourcc === "VP8L");
-    if (!parts.some((c) => c.fourcc === "VP8 " || c.fourcc === "VP8L")) throw new Error("WebP sin datos de imagen");
+    if (!parts.some((c) => c.fourcc === "VP8 " || c.fourcc === "VP8L")) throw new Error("Berkas WebP tidak memiliki data gambar");
     const payload = concat(parts.map((c) => chunk(c.fourcc, c.data)));
     const hasAlpha = parts.some((c) => c.fourcc === "ALPH" || c.fourcc === "VP8L");
     return { payload, hasAlpha };
@@ -599,7 +599,7 @@
 
   async function extractAudio(file, start, dur, fadeMs = 0) {
     const decoded = await decodeAudioFile(file);
-    if (decoded.duration < start + 0.05) throw new Error(`El audio dura ${decoded.duration.toFixed(2)} s y el tramo empieza en ${start.toFixed(2)} s`);
+    if (decoded.duration < start + 0.05) throw new Error(`Durasi audio ${decoded.duration.toFixed(2)} dtk dan segmen dimulai di ${start.toFixed(2)} dtk`);
     const len = Math.max(1, Math.round(dur * SAMPLE_RATE));
     const octx = new OfflineAudioContext(1, len, SAMPLE_RATE);
     const src = octx.createBufferSource();
@@ -617,7 +617,7 @@
     for (let i = 0; i < pcm.length; i++) { const a = Math.abs(pcm[i]); if (a > peak) peak = a; sumsq += pcm[i] * pcm[i]; }
     const rms = Math.sqrt(sumsq / pcm.length);
     log("info", "audio:pcm", { canalesOriginales: decoded.numberOfChannels, rateOriginal: decoded.sampleRate, duracionAudio: decoded.duration, muestras: pcm.length, pico: +peak.toFixed(4), rms: +rms.toFixed(4) });
-    if (peak < 0.0005) log("warn", "audio:silencio", "El tramo elegido parece no tener sonido");
+    if (peak < 0.0005) log("warn", "audio:silencio", "Segmen audio yang dipilih tampak sunyi");
     return pcm;
   }
 
@@ -690,7 +690,7 @@
       while (len >= 255) { lacing.push(255); len -= 255; }
       lacing.push(len);
     }
-    if (lacing.length > 255) throw new Error("Página Ogg con demasiados segmentos");
+    if (lacing.length > 255) throw new Error("Halaman Ogg memiliki terlalu banyak segmen");
     const dataLen = packetList.reduce((a, p) => a + p.length, 0);
     const page = new Uint8Array(27 + lacing.length + dataLen);
     const dv = new DataView(page.buffer);
@@ -946,7 +946,7 @@
         const ok = an.cells.filter((x) => (side === "auto" || x.side === +side) && (fps === "auto" || x.fps === +fps) && x.estado !== "no" && x.estado !== "fuera");
         c = ok.sort((x, y) => y.score - x.score)[0];
       }
-      if (!c) throw new Error("Ninguna combinación cabe en 1 MB para este tramo");
+      if (!c) throw new Error("Tidak ada kombinasi yang muat di bawah 1 MB untuk segmen ini");
       const r = await create(an, { side: c.side, fps: c.fps, syncMs, still, onProgress, signal });
       r.analysis = { auto: an.auto, cells: an.cells, ms: an.ms, captureFps: an.captureFps, captureSide: an.captureSide };
       return r;

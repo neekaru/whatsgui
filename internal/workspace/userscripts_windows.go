@@ -417,11 +417,7 @@ func (s *userscriptStore) installExample(filename, code string) ([]Userscript, e
 		return nil, err
 	}
 	target := filepath.Join(s.dir, filename)
-	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
-		if err := writeFileAtomic(target, []byte(code)); err != nil {
-			return nil, err
-		}
-	} else if err != nil {
+	if err := writeFileAtomic(target, []byte(code)); err != nil {
 		return nil, err
 	}
 	state[filename] = true
@@ -441,11 +437,6 @@ func (s *userscriptStore) installAudioStickerAssetsLocked() error {
 			return err
 		}
 		target := filepath.Join(s.dir, filepath.FromSlash(path))
-		if _, statErr := os.Stat(target); statErr == nil {
-			return nil
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return statErr
-		}
 		data, readErr := exampleuserscripts.AudioStickersAssets.ReadFile(path)
 		if readErr != nil {
 			return readErr
