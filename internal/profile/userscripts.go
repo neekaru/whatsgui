@@ -6,25 +6,44 @@ import (
 	"strings"
 )
 
-// MaxUserscriptBytes bounds the size of a single userscript file.
-const MaxUserscriptBytes = 1 << 20
+const (
+	// MaxUserscriptBytes bounds the size of a single userscript or @require file.
+	MaxUserscriptBytes = 2 << 20
+	// MaxResolvedUserscriptBytes bounds the combined source after resolving @require.
+	MaxResolvedUserscriptBytes = 4 << 20
+
+	RunAtDocumentStart = "document-start"
+	RunAtDocumentEnd   = "document-end"
+	RunAtDocumentIdle  = "document-idle"
+)
 
 // UserscriptPayload is an enabled userscript pushed from the workspace to a
 // profile worker over the private pipe.
 type UserscriptPayload struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Code string `json:"code"`
-	Hash string `json:"hash"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Author      string   `json:"author,omitempty"`
+	Namespace   string   `json:"namespace,omitempty"`
+	RunAt       string   `json:"runAt,omitempty"`
+	Grants      []string `json:"grants,omitempty"`
+	Matches     []string `json:"matches,omitempty"`
+	Code        string   `json:"code"`
+	Hash        string   `json:"hash"`
 }
 
 // UserscriptMetadata holds standard ==UserScript== header fields.
 type UserscriptMetadata struct {
 	Name        string
+	Namespace   string
 	Description string
 	Version     string
 	Author      string
+	RunAt       string
 	Matches     []string
+	Requires    []string
+	Grants      []string
 }
 
 // HashUserscript returns a short deterministic digest of the script source so
@@ -34,10 +53,22 @@ func HashUserscript(code string) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// NormalizeRunAt maps @run-at values to one of the supported lifecycle stages.
+func NormalizeRunAt(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case RunAtDocumentStart:
+		return RunAtDocumentStart
+	case RunAtDocumentEnd:
+		return RunAtDocumentEnd
+	default:
+		return RunAtDocumentIdle
+	}
+}
+
 // ParseUserscriptMetadata extracts ==UserScript== header metadata from code.
 // Missing names fall back to filename without its .user.js/.js suffix.
 func ParseUserscriptMetadata(filename, code string) UserscriptMetadata {
-	var meta UserscriptMetadata
+	meta := UserscriptMetadata{RunAt: RunAtDocumentIdle}
 	inHeader := false
 	for rawLine := range strings.SplitSeq(code, "\n") {
 		line := strings.TrimSpace(strings.TrimSuffix(rawLine, "\r"))
@@ -73,6 +104,10 @@ func ParseUserscriptMetadata(filename, code string) UserscriptMetadata {
 			if meta.Name == "" {
 				meta.Name = val
 			}
+		case "namespace":
+			if meta.Namespace == "" {
+				meta.Namespace = val
+			}
 		case "description":
 			if meta.Description == "" {
 				meta.Description = val
@@ -85,8 +120,14 @@ func ParseUserscriptMetadata(filename, code string) UserscriptMetadata {
 			if meta.Author == "" {
 				meta.Author = val
 			}
+		case "run-at":
+			meta.RunAt = NormalizeRunAt(val)
 		case "match", "include":
 			meta.Matches = append(meta.Matches, val)
+		case "require":
+			meta.Requires = append(meta.Requires, val)
+		case "grant":
+			meta.Grants = append(meta.Grants, val)
 		}
 	}
 	if meta.Name == "" {

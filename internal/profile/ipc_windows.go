@@ -3,6 +3,7 @@ package profile
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -10,9 +11,13 @@ import (
 	"fmt"
 	"image/png"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 )
 
 // Message is sent only over the private pipe to the workspace process.
@@ -79,7 +84,7 @@ type connection struct {
 
 func newConnection(input io.Reader, output io.Writer) *connection {
 	scanner := bufio.NewScanner(input)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	return &connection{input: scanner, output: json.NewEncoder(output)}
 }
 
@@ -94,7 +99,7 @@ func validUserscripts(list []UserscriptPayload) bool {
 		if len(item.Name) > 256 || strings.ContainsRune(item.Name, 0) {
 			return false
 		}
-		if len(item.Code) > MaxUserscriptBytes || !utf8.ValidString(item.Code) {
+		if len(item.Code) > MaxResolvedUserscriptBytes || !utf8.ValidString(item.Code) {
 			return false
 		}
 	}
@@ -163,8 +168,12 @@ func ValidID(id string) bool {
 	return err == nil && len(b) == 16 && id == strings.ToLower(id)
 }
 
-// ProfileBridge exposes notifications only, not workspace or filesystem access.
-type ProfileBridge struct{ conn *connection }
+// ProfileBridge exposes notifications and bounded userscript GM APIs to the page.
+type ProfileBridge struct {
+	conn *connection
+	gm   *gmStorage
+	ctx  context.Context
+}
 
 func (b *ProfileBridge) Notify(title, body, token string, silent bool, encodedImage string) error {
 	if utf8.RuneCountInString(title) > 256 || utf8.RuneCountInString(body) > 4096 || len(token) > 128 {
@@ -207,4 +216,46 @@ func (b *ProfileBridge) SetUnread(count int) error {
 		return errors.New("jumlah pesan belum dibaca tidak valid")
 	}
 	return b.conn.send(Message{Kind: "unread", Count: count})
+}
+
+// GMSetValue stores a JSON-encoded value for a userscript in the profile.
+func (b *ProfileBridge) GMSetValue(scriptID, key, jsonValue string) error {
+	if b.gm == nil {
+		return errors.New("penyimpanan userscript belum siap")
+	}
+	return b.gm.set(scriptID, key, jsonValue)
+}
+
+// GMDeleteValue removes a key from a userscript's storage in the profile.
+func (b *ProfileBridge) GMDeleteValue(scriptID, key string) error {
+	if b.gm == nil {
+		return errors.New("penyimpanan userscript belum siap")
+	}
+	return b.gm.delete(scriptID, key)
+}
+
+// GMFetch performs an HTTP request on behalf of a userscript (GM_xmlhttpRequest).
+func (b *ProfileBridge) GMFetch(reqJSON string) (string, error) {
+	ctx := b.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return performGMFetch(ctx, reqJSON)
+}
+
+// GMSetClipboard copies plain text to the system clipboard for a userscript.
+func (b *ProfileBridge) GMSetClipboard(text string) error {
+	if len(text) > 1<<20 {
+		return errors.New("teks clipboard terlalu panjang")
+	}
+	return mygo.Clipboard.Write(transfer.TextData(text))
+}
+
+// GMOpenInTab opens an external http/https URL in the user's browser.
+func (b *ProfileBridge) GMOpenInTab(rawURL string) error {
+	u, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return errors.New("URL GM_openInTab tidak valid")
+	}
+	return b.conn.send(Message{Kind: "external", URL: u.String()})
 }

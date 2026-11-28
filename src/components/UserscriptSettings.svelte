@@ -141,10 +141,10 @@
     });
   }
 
-  async function installExample() {
+  async function installExample(id: string, label: string) {
     await runAction(async () => {
-      scripts = await Workspace.installExampleUserscript();
-      showStatus("Contoh userscript (Privacy Blur) berhasil dipasang & diaktifkan.");
+      scripts = await Workspace.installExampleUserscript(id);
+      showStatus(`Contoh userscript (${label}) berhasil dipasang & diaktifkan.`);
     });
   }
 
@@ -234,9 +234,12 @@
           Tambahkan skrip JavaScript kustom untuk berjalan di halaman WhatsApp Web (<code>https://web.whatsapp.com/*</code>). Anda bisa mengimpor berkas <code>.user.js</code>, menulis skrip baru, atau memasang contoh bawaan.
         </p>
       </div>
-      <div class="card-action-row">
-        <button class="btn btn-primary" type="button" onclick={installExample} disabled={busy}>
-          <span>Pasang Contoh Userscript (Privacy Blur)</span>
+      <div class="card-footer-actions">
+        <button class="btn btn-primary" type="button" onclick={() => void installExample("wa-audio-stickers.user.js", "Stiker Audio")} disabled={busy}>
+          <span>Pasang Contoh: Stiker Audio</span>
+        </button>
+        <button class="btn btn-secondary" type="button" onclick={() => void installExample("privacy-blur-toggle.user.js", "Privacy Blur")} disabled={busy}>
+          <span>Pasang Contoh: Privacy Blur</span>
         </button>
       </div>
     </div>
@@ -287,12 +290,21 @@
       {/each}
     </div>
 
-    {#if !scripts.some((s) => s.id === "privacy-blur-toggle.user.js")}
+    {#if !scripts.some((s) => s.id === "wa-audio-stickers.user.js") || !scripts.some((s) => s.id === "privacy-blur-toggle.user.js")}
       <div class="userscripts-example-bar">
-        <span>Ingin mencoba contoh skrip privasi (blur chat dengan Alt+B)?</span>
-        <button class="btn btn-secondary btn-xs" type="button" onclick={installExample} disabled={busy}>
-          Pasang Contoh
-        </button>
+        <span>Pasang contoh userscript bawaan:</span>
+        <div class="userscripts-actions-right">
+          {#if !scripts.some((s) => s.id === "wa-audio-stickers.user.js")}
+            <button class="btn btn-secondary btn-xs" type="button" onclick={() => void installExample("wa-audio-stickers.user.js", "Stiker Audio")} disabled={busy}>
+              Stiker Audio
+            </button>
+          {/if}
+          {#if !scripts.some((s) => s.id === "privacy-blur-toggle.user.js")}
+            <button class="btn btn-secondary btn-xs" type="button" onclick={() => void installExample("privacy-blur-toggle.user.js", "Privacy Blur")} disabled={busy}>
+              Privacy Blur
+            </button>
+          {/if}
+        </div>
       </div>
     {/if}
   {/if}

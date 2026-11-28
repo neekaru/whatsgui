@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -18,16 +19,28 @@ import (
 	"whatsappgui-new/internal/profile"
 )
 
-const exampleUserscriptFilename = "privacy-blur-toggle.user.js"
+const (
+	exampleUserscriptFilename    = "privacy-blur-toggle.user.js"
+	audioStickersExampleFilename = "wa-audio-stickers.user.js"
+)
+
+var bundledExamples = map[string]string{
+	exampleUserscriptFilename:    exampleuserscripts.PrivacyBlurExample,
+	audioStickersExampleFilename: exampleuserscripts.AudioStickersExample,
+}
 
 // Userscript describes a stored user script and its current enabled state.
 type Userscript struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
+	Namespace   string   `json:"namespace"`
 	Description string   `json:"description"`
 	Version     string   `json:"version"`
 	Author      string   `json:"author"`
+	RunAt       string   `json:"runAt"`
 	Matches     []string `json:"matches"`
+	Requires    []string `json:"requires"`
+	Grants      []string `json:"grants"`
 	MatchesApp  bool     `json:"matchesApp"`
 	Enabled     bool     `json:"enabled"`
 	Code        string   `json:"code"`
@@ -132,13 +145,25 @@ func (s *userscriptStore) listLocked() ([]Userscript, error) {
 		if matches == nil {
 			matches = []string{}
 		}
+		requires := meta.Requires
+		if requires == nil {
+			requires = []string{}
+		}
+		grants := meta.Grants
+		if grants == nil {
+			grants = []string{}
+		}
 		scripts = append(scripts, Userscript{
 			ID:          name,
 			Name:        meta.Name,
+			Namespace:   meta.Namespace,
 			Description: meta.Description,
 			Version:     meta.Version,
 			Author:      meta.Author,
+			RunAt:       meta.RunAt,
 			Matches:     matches,
+			Requires:    requires,
+			Grants:      grants,
 			MatchesApp:  profile.MatchesWhatsApp(meta.Matches),
 			Enabled:     enabled,
 			Code:        code,
@@ -154,8 +179,64 @@ func (s *userscriptStore) listLocked() ([]Userscript, error) {
 	return scripts, nil
 }
 
+func (s *userscriptStore) resolveRequiresLocked(requires []string, mainCode string) (string, error) {
+	if len(requires) == 0 {
+		return mainCode, nil
+	}
+	baseAbs, err := filepath.Abs(s.dir)
+	if err != nil {
+		return "", err
+	}
+	var out strings.Builder
+	for _, rawReq := range requires {
+		req := strings.TrimSpace(rawReq)
+		if req == "" || strings.ContainsAny(req, "\x00") || strings.Contains(req, "://") || strings.HasPrefix(req, "//") {
+			return "", fmt.Errorf("@require hanya mendukung jalur file lokal di dalam folder userscripts: %q", rawReq)
+		}
+		rel := filepath.FromSlash(req)
+		if filepath.IsAbs(rel) {
+			return "", fmt.Errorf("@require tidak boleh berupa jalur absolut: %q", rawReq)
+		}
+		targetAbs := filepath.Clean(filepath.Join(baseAbs, rel))
+		within, err := filepath.Rel(baseAbs, targetAbs)
+		if err != nil || within == "." || within == ".." || strings.HasPrefix(within, ".."+string(filepath.Separator)) {
+			return "", fmt.Errorf("@require keluar dari folder userscripts: %q", rawReq)
+		}
+		if !strings.HasSuffix(strings.ToLower(targetAbs), ".js") {
+			return "", fmt.Errorf("@require harus merujuk ke berkas .js: %q", rawReq)
+		}
+		info, err := os.Stat(targetAbs)
+		if err != nil {
+			return "", fmt.Errorf("gagal memuat @require %q: %w", rawReq, err)
+		}
+		if !info.Mode().IsRegular() || info.Size() > profile.MaxUserscriptBytes {
+			return "", fmt.Errorf("berkas @require %q tidak valid atau melebihi batas ukuran", rawReq)
+		}
+		raw, err := os.ReadFile(targetAbs)
+		if err != nil {
+			return "", fmt.Errorf("gagal membaca @require %q: %w", rawReq, err)
+		}
+		if !utf8.Valid(raw) {
+			return "", fmt.Errorf("berkas @require %q bukan teks UTF-8", rawReq)
+		}
+		out.WriteString("// --- @require ")
+		out.WriteString(req)
+		out.WriteString(" ---\n")
+		out.Write(raw)
+		out.WriteString("\n;\n")
+	}
+	out.WriteString(mainCode)
+	resolved := out.String()
+	if len(resolved) > profile.MaxResolvedUserscriptBytes {
+		return "", errors.New("total ukuran userscript dan @require melebihi batas 4 MB")
+	}
+	return resolved, nil
+}
+
 func (s *userscriptStore) activePayloads() ([]profile.UserscriptPayload, error) {
-	list, err := s.list()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	list, err := s.listLocked()
 	if err != nil {
 		return nil, err
 	}
@@ -164,11 +245,22 @@ func (s *userscriptStore) activePayloads() ([]profile.UserscriptPayload, error) 
 		if !item.Enabled || !item.MatchesApp {
 			continue
 		}
+		resolved, err := s.resolveRequiresLocked(item.Requires, item.Code)
+		if err != nil {
+			return nil, fmt.Errorf("userscript %q: %w", item.Name, err)
+		}
 		out = append(out, profile.UserscriptPayload{
-			ID:   item.ID,
-			Name: item.Name,
-			Code: item.Code,
-			Hash: profile.HashUserscript(item.Code),
+			ID:          item.ID,
+			Name:        item.Name,
+			Version:     item.Version,
+			Description: item.Description,
+			Author:      item.Author,
+			Namespace:   item.Namespace,
+			RunAt:       item.RunAt,
+			Grants:      item.Grants,
+			Matches:     item.Matches,
+			Code:        resolved,
+			Hash:        profile.HashUserscript(resolved),
 		})
 	}
 	return out, nil
@@ -309,17 +401,22 @@ func (s *userscriptStore) remove(id string) ([]Userscript, error) {
 	return s.listLocked()
 }
 
-func (s *userscriptStore) installExample(code string) ([]Userscript, error) {
+func (s *userscriptStore) installExample(filename, code string) ([]Userscript, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return nil, err
 	}
+	if filename == audioStickersExampleFilename {
+		if err := s.installAudioStickerAssetsLocked(); err != nil {
+			return nil, err
+		}
+	}
 	state, err := s.loadStateLocked()
 	if err != nil {
 		return nil, err
 	}
-	target := filepath.Join(s.dir, exampleUserscriptFilename)
+	target := filepath.Join(s.dir, filename)
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
 		if err := writeFileAtomic(target, []byte(code)); err != nil {
 			return nil, err
@@ -327,11 +424,34 @@ func (s *userscriptStore) installExample(code string) ([]Userscript, error) {
 	} else if err != nil {
 		return nil, err
 	}
-	state[exampleUserscriptFilename] = true
+	state[filename] = true
 	if err := s.saveStateLocked(state); err != nil {
 		return nil, err
 	}
 	return s.listLocked()
+}
+
+func (s *userscriptStore) installAudioStickerAssetsLocked() error {
+	assetDir := filepath.Join(s.dir, "wa-audio-stickers")
+	if err := os.MkdirAll(assetDir, 0o755); err != nil {
+		return err
+	}
+	return fs.WalkDir(exampleuserscripts.AudioStickersAssets, "wa-audio-stickers", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		target := filepath.Join(s.dir, filepath.FromSlash(path))
+		if _, statErr := os.Stat(target); statErr == nil {
+			return nil
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return statErr
+		}
+		data, readErr := exampleuserscripts.AudioStickersAssets.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		return writeFileAtomic(target, data)
+	})
 }
 
 func normalizeImportedFilename(base string) string {
@@ -491,9 +611,16 @@ func (w *Workspace) DeleteUserscript(id string) ([]Userscript, error) {
 	return list, w.broadcastUserscripts(list)
 }
 
-// InstallExampleUserscript installs the bundled example userscript for WhatsApp Web.
-func (w *Workspace) InstallExampleUserscript() ([]Userscript, error) {
-	list, err := w.userscripts.installExample(exampleuserscripts.PrivacyBlurExample)
+// InstallExampleUserscript installs a bundled example userscript for WhatsApp Web.
+func (w *Workspace) InstallExampleUserscript(id string) ([]Userscript, error) {
+	if id == "" {
+		id = exampleUserscriptFilename
+	}
+	code, ok := bundledExamples[id]
+	if !ok {
+		return nil, errors.New("contoh userscript tidak ditemukan")
+	}
+	list, err := w.userscripts.installExample(id, code)
 	if err != nil {
 		return nil, err
 	}

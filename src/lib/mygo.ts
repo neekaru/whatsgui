@@ -90,10 +90,14 @@ export interface Tab {
 export interface Userscript {
   id: string;
   name: string;
+  namespace: string;
   description: string;
   version: string;
   author: string;
+  runAt: string;
   matches: string[];
+  requires: string[];
+  grants: string[];
   matchesApp: boolean;
   enabled: boolean;
   code: string;
@@ -141,8 +145,8 @@ export const Workspace = {
   getDND: bind<[], DNDSettings>("Workspace.GetDND", () => []),
   /** ImportUserscripts opens a file picker for .user.js/.js files and imports them. */
   importUserscripts: bind<[], Userscript[]>("Workspace.ImportUserscripts", () => []),
-  /** InstallExampleUserscript installs the bundled example userscript for WhatsApp Web. */
-  installExampleUserscript: bind<[], Userscript[]>("Workspace.InstallExampleUserscript", () => []),
+  /** InstallExampleUserscript installs a bundled example userscript for WhatsApp Web. */
+  installExampleUserscript: bind<[string], Userscript[]>("Workspace.InstallExampleUserscript", (id: string) => [id]),
   /**
    * MediaDevices lists the microphones and cameras of the active profile and the
    * device it has chosen. The list comes from the profile's WebView2 page, which

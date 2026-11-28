@@ -61,6 +61,7 @@ type worker struct {
 	theme            string
 	userscriptsMu    sync.Mutex
 	userscripts      []UserscriptPayload
+	gm               *gmStorage
 	name             string
 }
 
@@ -107,12 +108,13 @@ func Run(name string) error {
 	w.downloads = newDownloadManager(conn.send, filepath.Join(root, "downloads.json"))
 	w.downloads.setConfirm(w.confirmDownload)
 	w.downloads.setAllowStart(w.mainReady.Load)
+	w.gm = newGMStorage(filepath.Join(root, "userscript-storage.json"))
 	// Windows creates one WebView2 environment per process, from the app's
 	// first language, when the first window is made: this has to run before,
 	// and changing it later needs a new worker. The user's languages follow
 	// as fallbacks, so Indonesian leads the requests.
 	mygo.App.SetLanguages("id")
-	mygo.Bind(&ProfileBridge{conn: conn})
+	mygo.Bind(&ProfileBridge{conn: conn, gm: w.gm, ctx: ctx})
 	mygo.App.WhenReady(func() { w.open(cancel) })
 	return mygo.App.Run()
 }
@@ -147,11 +149,14 @@ func (w *worker) open(cancel context.CancelFunc) {
 	})
 	win.OnClosed(cancel)
 	w.page = win.Page()
+	w.page.OnDOMReady(func() {
+		go w.applyUserscripts(RunAtDocumentEnd)
+	})
 	w.page.OnDidFinishLoad(func() {
 		w.mainReady.Store(true)
 		pruneLegacySkeleton(w.name)
 		go w.applyTheme()
-		go w.applyUserscripts()
+		go w.applyUserscripts("")
 	})
 	w.page.OnDidFailLoad(func(err *mygo.LoadError) {
 		w.report(fmt.Errorf("WhatsApp gagal dimuat: %v", err))
@@ -221,7 +226,7 @@ func (w *worker) readCommands() {
 			w.userscriptsMu.Lock()
 			w.userscripts = slices.Clone(cmd.Userscripts)
 			w.userscriptsMu.Unlock()
-			go w.applyUserscripts()
+			go w.applyUserscripts("")
 		case "click":
 			token, err := json.Marshal(cmd.Token)
 			if err != nil {
@@ -311,7 +316,30 @@ func (w *worker) preload() string {
 		theme = ThemeSystem
 	}
 	value, _ := json.Marshal(theme)
-	return "window.__workspaceAppearance = {theme: " + string(value) + "};\n" + preloadScript
+	gmSnapshot := "{}"
+	if w.gm != nil {
+		gmSnapshot = w.gm.snapshotJSON()
+	}
+	var out strings.Builder
+	out.WriteString("window.__workspaceAppearance = {theme: ")
+	out.Write(value)
+	out.WriteString("};\nwindow.__workspaceGMStorage = ")
+	out.WriteString(gmSnapshot)
+	out.WriteString(";\n")
+	out.WriteString(gmRuntimeScript)
+	out.WriteByte('\n')
+	out.WriteString(preloadScript)
+	w.userscriptsMu.Lock()
+	scripts := slices.Clone(w.userscripts)
+	w.userscriptsMu.Unlock()
+	for _, script := range scripts {
+		if NormalizeRunAt(script.RunAt) == RunAtDocumentStart {
+			out.WriteString("\n(() => {\n")
+			out.WriteString(wrapUserscript(script, false))
+			out.WriteString("\n})();\n")
+		}
+	}
+	return out.String()
 }
 
 func (w *worker) applyTheme() {
@@ -333,28 +361,66 @@ func (w *worker) applyTheme() {
 	}
 }
 
-func (w *worker) applyUserscripts() {
-	if w.page == nil || !w.mainReady.Load() {
+func wrapUserscript(script UserscriptPayload, asyncBody bool) string {
+	keyJSON, _ := json.Marshal(script.ID + ":" + script.Hash)
+	nameJSON, _ := json.Marshal(script.Name)
+	metaJSON, _ := json.Marshal(struct {
+		ID          string   `json:"id"`
+		Name        string   `json:"name"`
+		Version     string   `json:"version"`
+		Description string   `json:"description"`
+		Author      string   `json:"author"`
+		Namespace   string   `json:"namespace"`
+		Matches     []string `json:"matches"`
+		RunAt       string   `json:"runAt"`
+		Grants      []string `json:"grants"`
+	}{
+		ID:          script.ID,
+		Name:        script.Name,
+		Version:     script.Version,
+		Description: script.Description,
+		Author:      script.Author,
+		Namespace:   script.Namespace,
+		Matches:     script.Matches,
+		RunAt:       NormalizeRunAt(script.RunAt),
+		Grants:      script.Grants,
+	})
+	body := "  (() => {\n" + script.Code + "\n  })();\n"
+	if asyncBody {
+		body = "  await (async () => {\n" + script.Code + "\n  })();\n"
+	}
+	return "if (location.origin !== 'https://web.whatsapp.com' || window !== window.top) return '';\n" +
+		"window.__workspaceUserscriptsExecuted ||= {};\n" +
+		"const __key = " + string(keyJSON) + ";\n" +
+		"if (window.__workspaceUserscriptsExecuted[__key]) return '';\n" +
+		"window.__workspaceUserscriptsExecuted[__key] = true;\n" +
+		"const __gm = window.__workspaceMakeGM ? window.__workspaceMakeGM(" + string(metaJSON) + ") : {};\n" +
+		"const { GM_info, GM_getValue, GM_setValue, GM_deleteValue, GM_listValues, GM_addStyle, GM_setClipboard, GM_openInTab, GM_notification, GM_xmlhttpRequest, GM } = __gm;\n" +
+		"const unsafeWindow = window;\n" +
+		"try {\n" +
+		body +
+		"  return '';\n" +
+		"} catch (err) {\n" +
+		"  console.error('[Workspace Userscript]', " + string(nameJSON) + ", err);\n" +
+		"  return String(err && err.message || err);\n" +
+		"}"
+}
+
+func (w *worker) applyUserscripts(stage string) {
+	if w.page == nil {
+		return
+	}
+	if stage == "" && !w.mainReady.Load() {
 		return
 	}
 	w.userscriptsMu.Lock()
 	scripts := slices.Clone(w.userscripts)
 	w.userscriptsMu.Unlock()
 	for _, script := range scripts {
-		keyJSON, _ := json.Marshal(script.ID + ":" + script.Hash)
-		nameJSON, _ := json.Marshal(script.Name)
-		wrapped := "if (location.origin !== 'https://web.whatsapp.com' || window !== window.top) return '';\n" +
-			"window.__workspaceUserscriptsExecuted ||= {};\n" +
-			"const __key = " + string(keyJSON) + ";\n" +
-			"if (window.__workspaceUserscriptsExecuted[__key]) return '';\n" +
-			"window.__workspaceUserscriptsExecuted[__key] = true;\n" +
-			"try {\n" +
-			"  await (async () => {\n" + script.Code + "\n  })();\n" +
-			"  return '';\n" +
-			"} catch (err) {\n" +
-			"  console.error('[Workspace Userscript]', " + string(nameJSON) + ", err);\n" +
-			"  return String(err && err.message || err);\n" +
-			"}"
+		if stage != "" && NormalizeRunAt(script.RunAt) != stage {
+			continue
+		}
+		wrapped := wrapUserscript(script, true)
 		ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
 		res, err := w.page.EvalContext(ctx, wrapped)
 		cancel()
