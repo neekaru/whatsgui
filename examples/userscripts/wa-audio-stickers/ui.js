@@ -926,9 +926,8 @@
       const resInfo = h("div", { class: "muted", style: "max-width:380px" });
       const togetherBtn = h("button", { class: "sec", type: "button", textContent: "▶ Putar Bersamaan" });
       const destSel = h("select", null,
-        h("option", { value: "abierto-solo", textContent: "Kirim ke chat yang terbuka" }),
-        h("option", { value: "abierto", textContent: "Kirim ke chat terbuka & buka Teruskan" }),
-        h("option", { value: "propio", textContent: "Simpan ke chat sendiri (Anda) & buka Teruskan" }));
+        h("option", { value: "abierto-solo", textContent: "Langsung kirim ke chat ini" }),
+        h("option", { value: "propio", textContent: "Simpan ke chat saya & pilih penerima lain" }));
       const sendBtn = h("button", { class: "act", type: "button", textContent: "Kirim Stiker" });
       const dlBtn = h("button", { class: "sec", type: "button", textContent: "Unduh .webp & .ogg" });
       const staleNote = h("div", { class: "stale", style: "display:none;margin-top:8px" },
@@ -1007,7 +1006,7 @@
               onProgress: (t) => setStatus(t),
             });
           });
-          setStatus(dest === "abierto-solo" ? "Terkirim." : "Terkirim. Pilih chat tujuan pada dialog Teruskan.", 1);
+          setStatus(dest === "abierto-solo" ? "Stiker berhasil dikirim ke chat ini." : "Tersimpan! Pilih chat tujuan di jendela Teruskan.", 1);
           api.onSent();
         } catch (e) {
           setStatus("Gagal mengirim: " + e.message, 0, true);

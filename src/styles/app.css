@@ -1796,3 +1796,27 @@ body {
   align-items: center;
   justify-content: space-between;
 }
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-light);
+  color: var(--fg);
+  font-size: 12.5px;
+}
+
+.update-banner-text {
+  margin: 0;
+  min-width: 0;
+}
+
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}

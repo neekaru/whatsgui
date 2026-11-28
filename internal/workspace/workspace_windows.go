@@ -103,6 +103,7 @@ type Workspace struct {
 	downloadDirs    map[string]string
 	downloadPrompts map[string]DownloadPrompt
 	userscripts     *userscriptStore
+	updater         *updaterState
 }
 
 func openWorkspace() (*Workspace, error) {
@@ -115,6 +116,7 @@ func openWorkspace() (*Workspace, error) {
 		processes:   make(map[string]*profileProcess),
 		tray:        newTrayState(filepath.Join(dir, "dnd.json")),
 		userscripts: newUserscriptStore(filepath.Join(dir, "userscripts"), filepath.Join(dir, "userscripts.json")),
+		updater:     newUpdaterState(),
 	}
 	if err := w.loadDND(); err != nil {
 		// A broken dnd.json must not keep the app from starting: the defaults

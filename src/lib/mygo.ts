@@ -86,6 +86,28 @@ export interface Tab {
   unread: number;
 }
 
+/** UpdateInfo describes the latest available release compared against the running app. */
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  notes: string;
+  publishedAt: string;
+  releaseUrl: string;
+  downloadUrl: string;
+  assetName: string;
+  canAutoInstall: boolean;
+  autoEnabled: boolean;
+}
+
+/** UpdateProgress reports progress while downloading or installing a signed update. */
+export interface UpdateProgress {
+  stage: string;
+  downloaded: number;
+  total: number;
+  error?: string;
+}
+
 /** Userscript describes a stored user script and its current enabled state. */
 export interface Userscript {
   id: string;
@@ -108,6 +130,13 @@ export interface Userscript {
 
 export const Workspace = {
   activate: bind<[string], State>("Workspace.Activate", (id: string) => [id]),
+  /** AppVersion returns the running application version string. */
+  appVersion: bind<[], string>("Workspace.AppVersion", () => []),
+  /**
+   * CheckForUpdates checks for a newer release via MyGo's signed updater when
+   * configured, falling back to the public GitHub Releases API.
+   */
+  checkForUpdates: bind<[], UpdateInfo>("Workspace.CheckForUpdates", () => []),
   /**
    * ChooseDownloadDirectory asks where the active profile saves downloads and
    * returns the chosen folder, or "" when the user cancels. The choice is
@@ -147,6 +176,11 @@ export const Workspace = {
   importUserscripts: bind<[], Userscript[]>("Workspace.ImportUserscripts", () => []),
   /** InstallExampleUserscript installs a bundled example userscript for WhatsApp Web. */
   installExampleUserscript: bind<[string], Userscript[]>("Workspace.InstallExampleUserscript", (id: string) => [id]),
+  /**
+   * InstallUpdate installs a signed update and relaunches when supported, or
+   * opens the GitHub release installer download in the user's browser.
+   */
+  installUpdate: bind<[], void>("Workspace.InstallUpdate", () => []),
   /**
    * MediaDevices lists the microphones and cameras of the active profile and the
    * device it has chosen. The list comes from the profile's WebView2 page, which
@@ -217,6 +251,10 @@ export const events = {
   downloadUpdated: event<DownloadItem>("downloadUpdated"),
   /** DownloadPrompted asks the UI to confirm or cancel an incoming download. */
   downloadPrompted: event<DownloadPrompt>("downloadPrompted"),
+  /** UpdateAvailable notifies the UI when a startup check finds a newer version. */
+  updateAvailable: event<UpdateInfo>("updateAvailable"),
+  /** UpdateProgressChanged notifies the UI during in-app update download and install. */
+  updateProgressChanged: event<UpdateProgress>("updateProgressChanged"),
   /** UserscriptsChanged notifies the UI whenever the userscripts list changes. */
   userscriptsChanged: event<Userscript[]>("userscriptsChanged"),
   workspaceChanged: event<State>("workspaceChanged"),

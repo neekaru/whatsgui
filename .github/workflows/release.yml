@@ -36,6 +36,8 @@ jobs:
         env:
           CGO_ENABLED: "0"
           APP_VERSION: ${{ inputs.version }}
+          MYGO_UPDATER_PUBLIC_KEY: ${{ secrets.MYGO_UPDATER_PUBLIC_KEY }}
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
         run: bun run build -- -platform "${{ inputs.platform || 'windows/amd64,windows/arm64' }}"
 
       - name: Package portable archives
@@ -45,11 +47,25 @@ jobs:
           Get-ChildItem -Path build -Directory -Filter "windows-*" | ForEach-Object {
             $target = $_.Name
             $zipPath = Join-Path "dist-release" "whatsgui-$target.zip"
-            $files = Get-ChildItem -Path $_.FullName -File | Where-Object { $_.Name -notlike "*-setup-*.exe" -and $_.Name -ne ".mygo-files" }
+            $files = Get-ChildItem -Path $_.FullName -File | Where-Object {
+              $_.Name -notlike "*-setup-*.exe" -and
+              $_.Name -ne ".mygo-files" -and
+              $_.Name -notlike "update-*.json" -and
+              $_.Name -notlike "*.tar.gz" -and
+              $_.Name -ne "install.ps1"
+            }
             if ($files) {
               Compress-Archive -Path $files.FullName -DestinationPath $zipPath -Force
             }
-            Get-ChildItem -Path $_.FullName -Filter "*-setup-*.exe" | Copy-Item -Destination dist-release -Force
+            Get-ChildItem -Path $_.FullName -File | Where-Object {
+              $_.Name -like "*-setup-*.exe" -or
+              $_.Name -like "update-*.json" -or
+              $_.Name -like "*.tar.gz" -or
+              $_.Name -eq "install.ps1"
+            } | Copy-Item -Destination dist-release -Force
+          }
+          if (Test-Path "build/checksums.txt") {
+            Copy-Item "build/checksums.txt" -Destination dist-release -Force
           }
           Get-ChildItem dist-release
 

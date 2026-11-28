@@ -51,6 +51,7 @@ func Run() error {
 		}()
 		win.Show()
 		workspace.setupTray()
+		go workspace.checkUpdatesOnStartup()
 	})
 	return mygo.App.Run()
 }

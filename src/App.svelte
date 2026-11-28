@@ -2,7 +2,7 @@
   import { onMount, tick } from "svelte";
   import { on } from "svelte/events";
   import { currentWindow } from "mygo-runtime";
-  import { Workspace, events, type State, type MediaSettings, type DownloadItem, type DownloadPrompt } from "./lib/mygo";
+  import { Workspace, events, type State, type MediaSettings, type DownloadItem, type DownloadPrompt, type UpdateInfo, type UpdateProgress } from "./lib/mygo";
   import { fileKind, joinPath } from "./lib/downloads";
   import NotificationSettings from "./components/NotificationSettings.svelte";
   import UserscriptSettings from "./components/UserscriptSettings.svelte";
@@ -42,6 +42,11 @@
   let downloadPreviewVisible = $state(false);
   let downloadPreviews = $state<Record<string, string>>({});
   let copiedDownloadId = $state("");
+  let appVersion = $state("");
+  let updateInfo = $state<UpdateInfo | null>(null);
+  let updateBannerDismissed = $state(false);
+  let updateChecking = $state(false);
+  let updateProgress = $state<UpdateProgress | null>(null);
 
   let view = $state<HTMLElement>();
   let tablist = $state<HTMLElement>();
@@ -249,6 +254,38 @@
 
   async function reloadProfile() {
     await run("reload", () => Workspace.reload());
+  }
+
+  async function checkForUpdates(manual = false) {
+    if (updateChecking) return;
+    updateChecking = true;
+    if (manual) {
+      settingsMessage = "";
+      error = "";
+    }
+    try {
+      const info = await Workspace.checkForUpdates();
+      updateInfo = info;
+      if (info.available) {
+        updateBannerDismissed = false;
+        if (manual) settingsMessage = `Versi baru v${info.latestVersion} tersedia.`;
+      } else if (manual) {
+        settingsMessage = `Aplikasi sudah menggunakan versi terbaru (v${info.currentVersion}).`;
+      }
+    } catch (e) {
+      if (manual) error = reason(e);
+    } finally {
+      updateChecking = false;
+    }
+  }
+
+  async function installAppUpdate() {
+    error = "";
+    try {
+      await Workspace.installUpdate();
+    } catch (e) {
+      error = reason(e);
+    }
   }
 
   function setTheme(value: "system" | "light" | "dark") {
@@ -474,6 +511,16 @@
         downloadPrompts = [...downloadPrompts, prompt];
       }
     });
+    const offUpdateAvailable = events.updateAvailable.on((info) => {
+      updateInfo = info;
+      updateBannerDismissed = false;
+    });
+    const offUpdateProgress = events.updateProgressChanged.on((prog) => {
+      updateProgress = prog;
+      if (prog.stage === "error" && prog.error) {
+        error = prog.error;
+      }
+    });
     const onEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (currentPrompt !== null) {
@@ -502,14 +549,16 @@
       if (next) model = next;
       loading = false;
       try {
-        const [list, dir, pendingPrompts] = await Promise.all([
+        const [list, dir, pendingPrompts, ver] = await Promise.all([
           Workspace.downloads(),
           Workspace.downloadDirectory(),
           Workspace.pendingDownloads(),
+          Workspace.appVersion(),
         ]);
         applyDownloads(list);
         if (dir) downloadDir = dir;
         if (pendingPrompts.length) downloadPrompts = pendingPrompts;
+        if (ver) appVersion = ver;
       } catch {
         // Non-fatal on startup
       }
@@ -521,6 +570,8 @@
       offDownloads();
       offDownloadUpdated();
       offDownloadPrompt();
+      offUpdateAvailable();
+      offUpdateProgress();
       window.removeEventListener("keydown", onEscape);
       window.removeEventListener("resize", onResize);
     };
@@ -709,6 +760,19 @@
         </svg>
         <span>Pengaturan</span>
       </button>
+
+      <button
+        class="toolbar-btn toolbar-btn-icon toolbar-btn-danger"
+        type="button"
+        onclick={() => void Workspace.quit()}
+        aria-label="Keluar dari aplikasi"
+        title="Keluar sepenuhnya dari aplikasi"
+      >
+        <svg class="t-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 2v5.5"/>
+          <path d="M4.6 4.2a5.5 5.5 0 1 0 6.8 0"/>
+        </svg>
+      </button>
     </div>
   </div>
 
@@ -726,6 +790,35 @@
           <path d="M3 3l10 10M13 3l-10 10" />
         </svg>
       </button>
+    </div>
+  {/if}
+
+  <!-- App Update Banner -->
+  {#if updateInfo?.available && !updateBannerDismissed}
+    <div class="update-banner" role="status">
+      <p class="update-banner-text">
+        {#if updateProgress?.stage === "downloading"}
+          Mengunduh pembaruan v{updateInfo.latestVersion}…
+          {#if updateProgress.total > 0}
+            ({Math.round((updateProgress.downloaded / updateProgress.total) * 100)}%)
+          {/if}
+        {:else}
+          Pembaruan tersedia: <strong>v{updateInfo.latestVersion}</strong> (saat ini v{updateInfo.currentVersion})
+        {/if}
+      </p>
+      <div class="update-banner-actions">
+        <button
+          class="btn btn-primary btn-xs"
+          type="button"
+          disabled={updateProgress?.stage === "downloading" || updateProgress?.stage === "ready"}
+          onclick={installAppUpdate}
+        >
+          {updateInfo.canAutoInstall ? "Pasang & Mulai Ulang" : "Unduh Pembaruan"}
+        </button>
+        <button class="btn btn-secondary btn-xs" type="button" onclick={() => (updateBannerDismissed = true)}>
+          Nanti
+        </button>
+      </div>
     </div>
   {/if}
 
@@ -1007,6 +1100,39 @@
 
           {:else if settingsTab === "maintenance"}
             <div class="settings-panel">
+              <div class="settings-card">
+                <div class="card-header">
+                  <h3 class="card-title">Pembaruan Aplikasi (v{appVersion || "0.1.0"})</h3>
+                  <p class="card-desc">
+                    {#if updateInfo?.available}
+                      Versi terbaru <strong>v{updateInfo.latestVersion}</strong> tersedia di GitHub Releases.
+                    {:else}
+                      Periksa rilis terbaru secara otomatis dari GitHub Releases.
+                    {/if}
+                  </p>
+                </div>
+                <div class="card-footer-actions">
+                  <button
+                    class="btn btn-secondary"
+                    type="button"
+                    disabled={updateChecking || updateProgress?.stage === "downloading"}
+                    onclick={() => void checkForUpdates(true)}
+                  >
+                    <span>{updateChecking ? "Memeriksa…" : "Periksa Pembaruan"}</span>
+                  </button>
+                  {#if updateInfo?.available}
+                    <button
+                      class="btn btn-primary"
+                      type="button"
+                      disabled={updateProgress?.stage === "downloading" || updateProgress?.stage === "ready"}
+                      onclick={installAppUpdate}
+                    >
+                      <span>{updateInfo.canAutoInstall ? "Pasang & Mulai Ulang" : "Unduh Pembaruan"}</span>
+                    </button>
+                  {/if}
+                </div>
+              </div>
+
               <div class="settings-card">
                 <div class="card-header">
                   <h3 class="card-title">Bersihkan Cache Profil</h3>
