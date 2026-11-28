@@ -26,14 +26,23 @@
       try {
         if (!image.naturalWidth || !image.naturalHeight) return finish();
         const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
         for (const size of [128, 64]) {
           canvas.width = canvas.height = size;
-          const scale = Math.min(size / image.naturalWidth, size / image.naturalHeight);
+          // Fill the square icon edge-to-edge so non-square group/contact photos do not shrink.
+          const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight);
           const width = image.naturalWidth * scale;
           const height = image.naturalHeight * scale;
-          canvas.getContext('2d').drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
-          const data = canvas.toDataURL('image/png').split(',')[1];
-          if (data && data.length <= 32 * 1024) return finish(data);
+          ctx.clearRect(0, 0, size, size);
+          ctx.drawImage(image, (size - width) / 2, (size - height) / 2, width, height);
+          const png = canvas.toDataURL('image/png').split(',')[1];
+          if (png && png.length <= 32 * 1024) return finish(png);
+          ctx.globalCompositeOperation = 'destination-over';
+          ctx.fillStyle = '#111b21';
+          ctx.fillRect(0, 0, size, size);
+          ctx.globalCompositeOperation = 'source-over';
+          const jpeg = canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+          if (jpeg && jpeg.length <= 32 * 1024) return finish(jpeg);
         }
       } catch {
         // CSP/CORS, a revoked blob or a failed decode must not hide the text.

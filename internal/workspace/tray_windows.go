@@ -193,7 +193,7 @@ func trayIcon() ([]byte, error) {
 		return nil, fmt.Errorf("membaca icon.png: %w", err)
 	}
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, scaleTo(src, 32)); err != nil {
+	if err := png.Encode(&buf, scaleTo(src, 64)); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

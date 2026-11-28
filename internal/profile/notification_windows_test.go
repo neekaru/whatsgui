@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"strings"
 	"testing"
@@ -71,5 +72,25 @@ func TestInvalidNotificationPhotoKeepsText(t *testing.T) {
 				t.Fatalf("invalid photo suppressed or contaminated text delivery: %+v", msg)
 			}
 		})
+	}
+}
+
+func TestNotificationAcceptsJPEGPhoto(t *testing.T) {
+	var out bytes.Buffer
+	if err := jpeg.Encode(&out, image.NewNRGBA(image.Rect(0, 0, 128, 128)), &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatal(err)
+	}
+	var pipe bytes.Buffer
+	bridge := &ProfileBridge{conn: newConnection(strings.NewReader(""), &pipe)}
+	if err := bridge.Notify("Group", "Halo", "tok-jpeg", false, base64.StdEncoding.EncodeToString(out.Bytes())); err != nil {
+		t.Fatal(err)
+	}
+	var msg Message
+	if err := json.Unmarshal(pipe.Bytes(), &msg); err != nil {
+		t.Fatal(err)
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(msg.Image))
+	if err != nil || format != "jpeg" || cfg.Width != 128 || cfg.Height != 128 {
+		t.Fatalf("JPEG photo rejected or altered: format=%q cfg=%+v err=%v", format, cfg, err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"os"
 	"os/exec"
@@ -93,9 +94,13 @@ type Workspace struct {
 	bounds        Bounds
 	closing       atomic.Bool
 	quitOnce      sync.Once
-	tray          *trayState
-	notifications sync.Map
-	deletedIDs    []string
+	tray             *trayState
+	notifications    sync.Map
+	notifyMu         sync.Mutex
+	notifyWarned     atomic.Bool
+	notifyRetryDelay time.Duration
+	showNotify       func(mygo.NotificationOptions, func()) (*mygo.Notification, error)
+	deletedIDs       []string
 	// dlMu guards the downloads of every profile, which the profile readers
 	// update without waiting for mu.
 	dlMu            sync.Mutex
@@ -630,7 +635,9 @@ func (w *Workspace) start(id string) error {
 			case "notify":
 				go func(m profile.Message) {
 					if err := w.notify(id, m); err != nil {
-						WorkerError.Emit(w.window, err.Error())
+						if w.window != nil && !w.window.IsDestroyed() && !w.closing.Load() {
+							WorkerError.Emit(w.window, err.Error())
+						}
 					}
 				}(msg)
 			case "unread":
@@ -767,7 +774,25 @@ func (w *Workspace) close() {
 	w.shutdownTray()
 }
 
+func notificationContent(tabName, rawTitle, rawBody string) (title, body string) {
+	rawTitle = strings.TrimSpace(rawTitle)
+	if rawTitle != "" {
+		title = tabName + " — " + rawTitle
+	} else {
+		title = tabName
+	}
+	if strings.TrimSpace(rawBody) == "" {
+		body = "Pesan baru"
+	} else {
+		body = rawBody
+	}
+	return title, body
+}
+
 func (w *Workspace) notify(id string, msg profile.Message) error {
+	if w.closing.Load() {
+		return nil
+	}
 	w.mu.Lock()
 	i := w.index(id)
 	if i < 0 {
@@ -781,42 +806,96 @@ func (w *Workspace) notify(id string, msg profile.Message) error {
 	if w.DNDActive() {
 		return nil
 	}
-	if !mygo.NotificationsSupported() {
+	if w.showNotify == nil && !mygo.NotificationsSupported() {
 		return errors.New("notifikasi sistem tidak tersedia")
 	}
-	n := mygo.NewNotification(mygo.NotificationOptions{
-		Title: name + " — " + msg.Title, Body: msg.Body, Silent: msg.Silent,
-		Image: msg.Image,
-	})
-	key := id + "/" + msg.Token
+
+	title, body := notificationContent(name, msg.Title, msg.Body)
+	key := ""
 	if msg.Token != "" {
-		w.notifications.Store(key, n)
+		key = id + "/" + msg.Token
 	}
-	n.OnClick(func() {
-		n.Close()
-		w.notifications.Delete(key)
-		go func() {
-			state, err := w.Activate(id)
-			if err != nil {
-				WorkerError.Emit(w.window, err.Error())
-				return
+
+	w.notifyMu.Lock()
+	defer w.notifyMu.Unlock()
+
+	attempt := func(image []byte) error {
+		opts := mygo.NotificationOptions{
+			ID: key, Title: title, Body: body, Silent: msg.Silent, Image: image,
+		}
+		onClick := func() {
+			if key != "" {
+				w.notifications.Delete(key)
 			}
-			w.mu.Lock()
-			if p := w.processes[id]; p != nil && msg.Token != "" {
-				if err := w.sendCommand(p, profile.Command{Action: "click", Token: msg.Token}); err != nil {
-					WorkerError.Emit(w.window, "Gagal membuka percakapan dari notifikasi: "+err.Error())
+			go func() {
+				state, err := w.Activate(id)
+				if err != nil {
+					if w.window != nil && !w.window.IsDestroyed() && !w.closing.Load() {
+						WorkerError.Emit(w.window, err.Error())
+					}
+					return
 				}
+				w.mu.Lock()
+				if p := w.processes[id]; p != nil && msg.Token != "" {
+					if err := w.sendCommand(p, profile.Command{Action: "click", Token: msg.Token}); err != nil {
+						if w.window != nil && !w.window.IsDestroyed() && !w.closing.Load() {
+							WorkerError.Emit(w.window, "Gagal membuka percakapan dari notifikasi: "+err.Error())
+						}
+					}
+				}
+				w.mu.Unlock()
+				if w.window != nil && !w.window.IsDestroyed() {
+					w.window.Show()
+					w.window.Restore()
+					w.window.Focus()
+					WorkspaceChanged.Emit(w.window, state)
+				}
+			}()
+		}
+		if w.showNotify != nil {
+			n, err := w.showNotify(opts, onClick)
+			if err == nil && key != "" && n != nil {
+				w.notifications.Store(key, n)
 			}
-			w.mu.Unlock()
-			w.window.Show()
-			w.window.Restore()
-			w.window.Focus()
-			WorkspaceChanged.Emit(w.window, state)
-		}()
-	})
-	if err := n.Show(); err != nil {
-		w.notifications.Delete(key)
-		return err
+			return err
+		}
+		n := mygo.NewNotification(opts)
+		if key != "" {
+			w.notifications.Store(key, n)
+		}
+		n.OnClick(func() {
+			n.Close()
+			onClick()
+		})
+		if err := n.Show(); err != nil {
+			if key != "" {
+				w.notifications.Delete(key)
+			}
+			return err
+		}
+		return nil
+	}
+
+	err := attempt(msg.Image)
+	if err != nil && len(msg.Image) > 0 {
+		// Windows Shell_NotifyIconW can reject custom balloon icons; fall back to text-only.
+		err = attempt(nil)
+	}
+	if err != nil {
+		retryDelay := w.notifyRetryDelay
+		if retryDelay == 0 {
+			retryDelay = 150 * time.Millisecond
+		}
+		time.Sleep(retryDelay)
+		err = attempt(nil)
+	}
+	if err == nil {
+		w.notifyWarned.Store(false)
+		return nil
+	}
+	log.Printf("notifikasi gagal ditampilkan: %v", err)
+	if w.notifyWarned.CompareAndSwap(false, true) {
+		return fmt.Errorf("notifikasi desktop tidak dapat ditampilkan (%v)", err)
 	}
 	return nil
 }

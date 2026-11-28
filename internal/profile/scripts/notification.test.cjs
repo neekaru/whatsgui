@@ -64,3 +64,45 @@ test('service-worker delivery waits for the native result and reports errors', a
   reject(new Error('native delivery failed'));
   await assert.rejects(result, /native delivery failed/);
 });
+
+test('oversized 128px PNG falls back to 128px JPEG with cover crop', async () => {
+  const draws = [];
+  const encoded = [];
+  const ctx = {
+    globalCompositeOperation: 'source-over',
+    fillStyle: '',
+    clearRect: () => {},
+    fillRect: () => {},
+    drawImage: (_img, x, y, w, h) => draws.push({ size: canvas.width, x, y, w, h }),
+  };
+  const canvas = {
+    width: 0,
+    height: 0,
+    getContext: () => ctx,
+    toDataURL: (mime) => {
+      encoded.push({ size: canvas.width, mime });
+      if (mime === 'image/png') return `data:image/png;base64,${'A'.repeat(33 * 1024)}`;
+      return 'data:image/jpeg;base64,jpeg128';
+    },
+  };
+  const calls = [];
+  const images = [];
+  const window = { mygo: { call: (...args) => { calls.push(args); return Promise.resolve(); } } };
+  window.top = window;
+  class TestImage { constructor() { images.push(this); } }
+  class ServiceWorkerRegistration {}
+  vm.runInNewContext(script, {
+    window, Image: TestImage, ServiceWorkerRegistration, EventTarget, Event, URL,
+    document: { createElement: () => canvas },
+    location: { origin: 'https://web.whatsapp.com', href: 'https://web.whatsapp.com/' },
+    setTimeout: () => 1, clearTimeout: () => {},
+    console: { error: () => {} },
+  });
+  const notification = new window.Notification('Group', { body: 'Halo', icon: 'blob:https://web.whatsapp.com/group' });
+  Object.assign(images[0], { naturalWidth: 200, naturalHeight: 100 });
+  images[0].onload();
+  await notification.ready;
+  assert.deepEqual(draws[0], { size: 128, x: -64, y: 0, w: 256, h: 128 });
+  assert.deepEqual(encoded, [{ size: 128, mime: 'image/png' }, { size: 128, mime: 'image/jpeg' }]);
+  assert.equal(calls[0][5], 'jpeg128');
+});

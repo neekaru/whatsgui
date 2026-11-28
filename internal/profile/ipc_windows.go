@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"image/png"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"net/url"
 	"strings"
@@ -185,7 +187,7 @@ func (b *ProfileBridge) Notify(title, body, token string, silent bool, encodedIm
 	})
 }
 
-// This boundary accepts only the small PNGs produced by notification.js.
+// This boundary accepts only the small PNG/JPEG thumbnails produced by notification.js.
 // Bad or oversized pictures are omitted, never allowed to kill text delivery.
 func notificationImage(encoded string) []byte {
 	const maxBytes = 24 << 10
@@ -196,8 +198,8 @@ func notificationImage(encoded string) []byte {
 	if err != nil || len(data) > maxBytes {
 		return nil
 	}
-	config, err := png.DecodeConfig(bytes.NewReader(data))
-	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 128 || config.Height > 128 {
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || (format != "png" && format != "jpeg") || config.Width < 1 || config.Height < 1 || config.Width > 128 || config.Height > 128 {
 		return nil
 	}
 	return data
