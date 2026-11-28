@@ -58,15 +58,16 @@ type MediaDevice struct {
 
 // Command is a request from the workspace process over the private pipe.
 type Command struct {
-	Action  string `json:"action"`
-	ID      string `json:"id"`
-	Token   string `json:"token"`
-	AudioID string `json:"audioId"`
-	VideoID string `json:"videoId"`
-	Theme   string `json:"theme"`
-	Dir     string `json:"dir"`
-	Name    string `json:"name,omitempty"`
-	Accept  bool   `json:"accept,omitempty"`
+	Action      string              `json:"action"`
+	ID          string              `json:"id"`
+	Token       string              `json:"token"`
+	AudioID     string              `json:"audioId"`
+	VideoID     string              `json:"videoId"`
+	Theme       string              `json:"theme"`
+	Dir         string              `json:"dir"`
+	Name        string              `json:"name,omitempty"`
+	Accept      bool                `json:"accept,omitempty"`
+	Userscripts []UserscriptPayload `json:"userscripts,omitempty"`
 }
 
 // One reader owns stdin; the encoder is shared by page callbacks and bound methods.
@@ -77,7 +78,27 @@ type connection struct {
 }
 
 func newConnection(input io.Reader, output io.Writer) *connection {
-	return &connection{input: bufio.NewScanner(input), output: json.NewEncoder(output)}
+	scanner := bufio.NewScanner(input)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	return &connection{input: scanner, output: json.NewEncoder(output)}
+}
+
+func validUserscripts(list []UserscriptPayload) bool {
+	if len(list) > 128 {
+		return false
+	}
+	for _, item := range list {
+		if item.ID == "" || len(item.ID) > 256 || strings.ContainsRune(item.ID, 0) {
+			return false
+		}
+		if len(item.Name) > 256 || strings.ContainsRune(item.Name, 0) {
+			return false
+		}
+		if len(item.Code) > MaxUserscriptBytes || !utf8.ValidString(item.Code) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *connection) receive() (Command, error) {
@@ -95,7 +116,11 @@ func (c *connection) receive() (Command, error) {
 		return cmd, errors.New("ID permintaan terlalu panjang")
 	}
 	switch cmd.Action {
-	case "start", "reload", "quit", "devtools":
+	case "start":
+		if !validUserscripts(cmd.Userscripts) {
+			return cmd, errors.New("daftar userscript tidak valid")
+		}
+	case "reload", "quit", "devtools":
 	case "click":
 		if len(cmd.Token) > 128 {
 			return cmd, errors.New("token notifikasi terlalu panjang")
@@ -108,6 +133,10 @@ func (c *connection) receive() (Command, error) {
 	case "theme":
 		if cmd.Theme != ThemeSystem && cmd.Theme != ThemeLight && cmd.Theme != ThemeDark {
 			return cmd, errors.New("tema tidak valid")
+		}
+	case "userscripts":
+		if !validUserscripts(cmd.Userscripts) {
+			return cmd, errors.New("daftar userscript tidak valid")
 		}
 	case "setdownloaddir":
 		if len(cmd.Dir) > 1024 || strings.ContainsRune(cmd.Dir, 0) {

@@ -86,6 +86,20 @@ export interface Tab {
   unread: number;
 }
 
+/** Userscript describes a stored user script and its current enabled state. */
+export interface Userscript {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  matches: string[];
+  matchesApp: boolean;
+  enabled: boolean;
+  code: string;
+  updatedAt: number;
+}
+
 // ---- Services ----
 
 export const Workspace = {
@@ -109,6 +123,8 @@ export const Workspace = {
    * by the schedule.
    */
   dndActive: bind<[], boolean>("Workspace.DNDActive", () => []),
+  /** DeleteUserscript deletes a userscript file from the workspace. */
+  deleteUserscript: bind<[string], Userscript[]>("Workspace.DeleteUserscript", (id: string) => [id]),
   /**
    * DownloadDirectory is the folder the active profile saves downloads to, or
    * "" while the profile has not reported it yet.
@@ -123,6 +139,10 @@ export const Workspace = {
   downloads: bind<[], DownloadItem[]>("Workspace.Downloads", () => []),
   /** GetDND returns the saved Do Not Disturb settings. */
   getDND: bind<[], DNDSettings>("Workspace.GetDND", () => []),
+  /** ImportUserscripts opens a file picker for .user.js/.js files and imports them. */
+  importUserscripts: bind<[], Userscript[]>("Workspace.ImportUserscripts", () => []),
+  /** InstallExampleUserscript installs the bundled example userscript for WhatsApp Web. */
+  installExampleUserscript: bind<[], Userscript[]>("Workspace.InstallExampleUserscript", () => []),
   /**
    * MediaDevices lists the microphones and cameras of the active profile and the
    * device it has chosen. The list comes from the profile's WebView2 page, which
@@ -140,6 +160,8 @@ export const Workspace = {
    * the page.
    */
   openDownload: bind<[string], void>("Workspace.OpenDownload", (id: string) => [id]),
+  /** OpenUserscriptsDirectory ensures the userscripts folder exists and opens it in Explorer. */
+  openUserscriptsDirectory: bind<[], void>("Workspace.OpenUserscriptsDirectory", () => []),
   /** PendingDownloads returns any download confirmations currently waiting for the user. */
   pendingDownloads: bind<[], DownloadPrompt[]>("Workspace.PendingDownloads", () => []),
   /**
@@ -153,6 +175,8 @@ export const Workspace = {
   remove: bind<[string], State>("Workspace.Remove", (id: string) => [id]),
   rename: bind<[string, string], State>("Workspace.Rename", (id: string, name: string) => [id, name]),
   resize: bind<[Bounds], void>("Workspace.Resize", (bounds: Bounds) => [bounds]),
+  /** SaveUserscript creates a new userscript (when id is empty) or updates an existing one. */
+  saveUserscript: bind<[string, string], Userscript[]>("Workspace.SaveUserscript", (id: string, code: string) => [id, code]),
   /**
    * SetDND saves the Do Not Disturb settings. While they are active, popups and
    * their sound are dropped; the unread counts keep updating.
@@ -166,9 +190,15 @@ export const Workspace = {
   setMediaDevices: bind<[string, string], void>("Workspace.SetMediaDevices", (audioID: string, videoID: string) => [audioID, videoID]),
   /** SetTheme applies the workspace theme to all WhatsApp profiles. */
   setTheme: bind<[string], void>("Workspace.SetTheme", (theme: string) => [theme]),
+  /** SetUserscriptEnabled toggles whether a userscript runs in WhatsApp profiles. */
+  setUserscriptEnabled: bind<[string, boolean], Userscript[]>("Workspace.SetUserscriptEnabled", (id: string, enabled: boolean) => [id, enabled]),
   /** ShowDownload shows a download in Explorer, selected in its folder. */
   showDownload: bind<[string], void>("Workspace.ShowDownload", (id: string) => [id]),
   state: bind<[], State>("Workspace.State", () => []),
+  /** Userscripts lists all userscripts stored in the workspace directory. */
+  userscripts: bind<[], Userscript[]>("Workspace.Userscripts", () => []),
+  /** UserscriptsDirectory returns the folder where workspace userscripts live. */
+  userscriptsDirectory: bind<[], string>("Workspace.UserscriptsDirectory", () => []),
 } as const;
 
 // ---- Events ----
@@ -183,6 +213,8 @@ export const events = {
   downloadUpdated: event<DownloadItem>("downloadUpdated"),
   /** DownloadPrompted asks the UI to confirm or cancel an incoming download. */
   downloadPrompted: event<DownloadPrompt>("downloadPrompted"),
+  /** UserscriptsChanged notifies the UI whenever the userscripts list changes. */
+  userscriptsChanged: event<Userscript[]>("userscriptsChanged"),
   workspaceChanged: event<State>("workspaceChanged"),
   workerError: event<string>("workerError"),
 } as const;

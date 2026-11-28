@@ -94,4 +94,10 @@ func TestMediaCommands(t *testing.T) {
 	if err != nil || cmd.Action != "downloadreply" || !cmd.Accept || cmd.Name != "baru.pdf" {
 		t.Fatalf("downloadreply valid ditolak: %+v %v", cmd, err)
 	}
+
+	largeCode := strings.Repeat("a", 80*1024)
+	cmd, err = newConnection(strings.NewReader(`{"action":"userscripts","userscripts":[{"id":"big.user.js","name":"Big","code":"`+largeCode+`"}]}`+"\n"), io.Discard).receive()
+	if err != nil || cmd.Action != "userscripts" || len(cmd.Userscripts) != 1 {
+		t.Fatalf("userscripts payload besar ditolak: %+v %v", cmd, err)
+	}
 }

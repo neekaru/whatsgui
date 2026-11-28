@@ -102,6 +102,7 @@ type Workspace struct {
 	downloadItems   map[string]DownloadItem
 	downloadDirs    map[string]string
 	downloadPrompts map[string]DownloadPrompt
+	userscripts     *userscriptStore
 }
 
 func openWorkspace() (*Workspace, error) {
@@ -110,9 +111,10 @@ func openWorkspace() (*Workspace, error) {
 		return nil, err
 	}
 	w := &Workspace{
-		file:      filepath.Join(dir, "tabs.json"),
-		processes: make(map[string]*profileProcess),
-		tray:      newTrayState(filepath.Join(dir, "dnd.json")),
+		file:        filepath.Join(dir, "tabs.json"),
+		processes:   make(map[string]*profileProcess),
+		tray:        newTrayState(filepath.Join(dir, "dnd.json")),
+		userscripts: newUserscriptStore(filepath.Join(dir, "userscripts"), filepath.Join(dir, "userscripts.json")),
 	}
 	if err := w.loadDND(); err != nil {
 		// A broken dnd.json must not keep the app from starting: the defaults
@@ -576,7 +578,8 @@ func (w *Workspace) start(id string) error {
 		return fmt.Errorf("mengisolasi proses profil: %w", err)
 	}
 	p.job = job
-	if err := w.sendCommand(p, profile.Command{Action: "start", Theme: w.theme}); err != nil {
+	payloads, _ := w.activeUserscriptPayloads()
+	if err := w.sendCommand(p, profile.Command{Action: "start", Theme: w.theme, Userscripts: payloads}); err != nil {
 		job.Close()
 		input.Close()
 		cmd.Wait()

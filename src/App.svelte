@@ -5,13 +5,14 @@
   import { Workspace, events, type State, type MediaSettings, type DownloadItem, type DownloadPrompt } from "./lib/mygo";
   import { fileKind, joinPath } from "./lib/downloads";
   import NotificationSettings from "./components/NotificationSettings.svelte";
+  import UserscriptSettings from "./components/UserscriptSettings.svelte";
   import DownloadConfirmModal from "./components/DownloadConfirmModal.svelte";
   import DownloadsModal from "./components/DownloadsModal.svelte";
   import DownloadPreviewBar from "./components/DownloadPreviewBar.svelte";
 
   type Pending = "startup" | "create" | "rename" | "remove" | "activate" | "reload" | "cache" | "devices" | "devtools";
   type Form = "none" | "create" | "rename" | "delete";
-  type SettingsTab = "appearance" | "devices" | "notifications" | "maintenance";
+  type SettingsTab = "appearance" | "devices" | "notifications" | "userscripts" | "maintenance";
 
   let model = $state<State>({ tabs: [], activeId: "" });
   let loading = $state(true);
@@ -812,6 +813,19 @@
           <button
             type="button"
             class="modal-tab-btn"
+            class:active={settingsTab === "userscripts"}
+            onclick={() => (settingsTab = "userscripts")}
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="5 4 1.5 8 5 12"/>
+              <polyline points="11 4 14.5 8 11 12"/>
+              <line x1="9.5" y1="3" x2="6.5" y2="13"/>
+            </svg>
+            <span>Userscript</span>
+          </button>
+          <button
+            type="button"
+            class="modal-tab-btn"
             class:active={settingsTab === "maintenance"}
             onclick={() => (settingsTab = "maintenance")}
           >
@@ -984,6 +998,11 @@
           {:else if settingsTab === "notifications"}
             <div class="settings-panel">
               <NotificationSettings />
+            </div>
+
+          {:else if settingsTab === "userscripts"}
+            <div class="settings-panel">
+              <UserscriptSettings hasActiveProfile={Boolean(active)} onReloadActive={reloadProfile} />
             </div>
 
           {:else if settingsTab === "maintenance"}

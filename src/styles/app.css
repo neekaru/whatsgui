@@ -1634,3 +1634,165 @@ body {
   width: 26px;
   height: 26px;
 }
+
+/* ==========================================================================
+   10. Userscript Settings
+   ========================================================================== */
+.userscripts-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.userscripts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.userscripts-actions-left,
+.userscripts-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.userscripts-dir-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.userscripts-dir-hint code,
+.userscript-meta code,
+.userscript-editor-card code {
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11.5px;
+}
+
+.userscript-code-input {
+  width: 100%;
+  min-height: 210px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--fg);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  tab-size: 2;
+}
+
+.userscript-code-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+  outline: none;
+}
+
+.userscripts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.userscript-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel-2);
+}
+
+.userscript-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.userscript-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.userscript-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.userscript-badge {
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  background: var(--accent-light);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.userscript-badge-warn {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.userscript-desc {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+
+.userscript-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.userscript-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.userscript-delete-btn:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.userscripts-example-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-md);
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+
+.userscripts-reload-alert {
+  align-items: center;
+  justify-content: space-between;
+}

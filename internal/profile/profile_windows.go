@@ -59,6 +59,8 @@ type worker struct {
 	mainReady        atomic.Bool
 	themeMu          sync.Mutex
 	theme            string
+	userscriptsMu    sync.Mutex
+	userscripts      []UserscriptPayload
 	name             string
 }
 
@@ -88,7 +90,7 @@ func Run(name string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	defer os.Stdin.Close()
-	w := &worker{conn: conn, ctx: ctx, theme: start.Theme, name: name}
+	w := &worker{conn: conn, ctx: ctx, theme: start.Theme, userscripts: start.Userscripts, name: name}
 	// Keep the process identity stable while routing all data to one root.
 	mygo.App.SetName(name)
 	root := os.Getenv(EnvProfileData)
@@ -149,6 +151,7 @@ func (w *worker) open(cancel context.CancelFunc) {
 		w.mainReady.Store(true)
 		pruneLegacySkeleton(w.name)
 		go w.applyTheme()
+		go w.applyUserscripts()
 	})
 	w.page.OnDidFailLoad(func(err *mygo.LoadError) {
 		w.report(fmt.Errorf("WhatsApp gagal dimuat: %v", err))
@@ -214,6 +217,11 @@ func (w *worker) readCommands() {
 			w.theme = cmd.Theme
 			w.themeMu.Unlock()
 			w.applyTheme()
+		case "userscripts":
+			w.userscriptsMu.Lock()
+			w.userscripts = slices.Clone(cmd.Userscripts)
+			w.userscriptsMu.Unlock()
+			go w.applyUserscripts()
 		case "click":
 			token, err := json.Marshal(cmd.Token)
 			if err != nil {
@@ -322,6 +330,43 @@ func (w *worker) applyTheme() {
 			w.report(fmt.Errorf("menerapkan tema WhatsApp: %w", err))
 		}
 		return
+	}
+}
+
+func (w *worker) applyUserscripts() {
+	if w.page == nil || !w.mainReady.Load() {
+		return
+	}
+	w.userscriptsMu.Lock()
+	scripts := slices.Clone(w.userscripts)
+	w.userscriptsMu.Unlock()
+	for _, script := range scripts {
+		keyJSON, _ := json.Marshal(script.ID + ":" + script.Hash)
+		nameJSON, _ := json.Marshal(script.Name)
+		wrapped := "if (location.origin !== 'https://web.whatsapp.com' || window !== window.top) return '';\n" +
+			"window.__workspaceUserscriptsExecuted ||= {};\n" +
+			"const __key = " + string(keyJSON) + ";\n" +
+			"if (window.__workspaceUserscriptsExecuted[__key]) return '';\n" +
+			"window.__workspaceUserscriptsExecuted[__key] = true;\n" +
+			"try {\n" +
+			"  await (async () => {\n" + script.Code + "\n  })();\n" +
+			"  return '';\n" +
+			"} catch (err) {\n" +
+			"  console.error('[Workspace Userscript]', " + string(nameJSON) + ", err);\n" +
+			"  return String(err && err.message || err);\n" +
+			"}"
+		ctx, cancel := context.WithTimeout(w.ctx, 10*time.Second)
+		res, err := w.page.EvalContext(ctx, wrapped)
+		cancel()
+		if err != nil {
+			if w.ctx.Err() == nil {
+				w.report(fmt.Errorf("userscript %q gagal dijalankan: %w", script.Name, err))
+			}
+			continue
+		}
+		if msg, ok := res.(string); ok && msg != "" {
+			w.report(fmt.Errorf("userscript %q error: %s", script.Name, msg))
+		}
 	}
 }
 
