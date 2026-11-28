@@ -678,17 +678,17 @@
       {/if}
 
       <button
-        class="toolbar-btn"
+        class="toolbar-btn toolbar-btn-icon"
         type="button"
         disabled={busy}
+        aria-label="Lihat daftar unduhan"
         aria-expanded={downloadsOpen}
         onclick={openDownloadsModal}
         title="Lihat daftar unduhan"
       >
-        <svg class="t-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <svg class="t-icon" viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M8 2v8M4.5 6.5L8 10l3.5-3.5M2.5 13h11"/>
         </svg>
-        <span>Unduhan</span>
         {#if activeDownloadCount > 0}
           <span class="toolbar-count-pill">{activeDownloadCount}</span>
         {/if}

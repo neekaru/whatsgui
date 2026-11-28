@@ -487,6 +487,12 @@ body {
   cursor: default;
 }
 
+.toolbar-btn-icon {
+  justify-content: center;
+  min-width: var(--control);
+  padding: 0 8px;
+}
+
 .toolbar-btn-danger:hover:not(:disabled) {
   border-color: var(--danger);
   background: var(--danger-soft);
