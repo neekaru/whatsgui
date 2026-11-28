@@ -117,10 +117,12 @@ func openWorkspace() (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
+	tabsFile := filepath.Join(dir, "tabs.json")
+	alreadyInitialized := fileExistsRegular(tabsFile)
 	oldName := legacyAppName(mygo.App.Name())
 	var oldUserData, oldLocalData string
 	var appMigrated bool
-	if oldName != "" {
+	if !alreadyInitialized && oldName != "" {
 		oldUserData = filepath.Join(filepath.Dir(dir), oldName)
 		oldLocalData = legacyProfileDirectory(oldName)
 		newLocalData := legacyProfileDirectory(mygo.App.Name())
@@ -130,7 +132,7 @@ func openWorkspace() (*Workspace, error) {
 		}
 	}
 	w := &Workspace{
-		file:        filepath.Join(dir, "tabs.json"),
+		file:        tabsFile,
 		processes:   make(map[string]*profileProcess),
 		tray:        newTrayState(filepath.Join(dir, "dnd.json")),
 		userscripts: newUserscriptStore(filepath.Join(dir, "userscripts"), filepath.Join(dir, "userscripts.json")),
@@ -197,7 +199,7 @@ func openWorkspace() (*Workspace, error) {
 			return nil, err
 		}
 	}
-	if oldName != "" {
+	if !alreadyInitialized && oldName != "" {
 		if exePath, exeErr := os.Executable(); exeErr == nil {
 			maybeUninstallLegacyApp(exePath, appMigrated, oldUserData, dir, oldLocalData, readWindowsUninstallEntry, runSilentUninstaller)
 		}

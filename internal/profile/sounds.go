@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -58,10 +60,11 @@ type NotificationSoundSettings struct {
 
 // NotificationSoundChannel is the runtime audio payload sent to profile workers.
 type NotificationSoundChannel struct {
-	Mode    string `json:"mode"`
-	Preset  string `json:"preset,omitempty"`
-	DataURL string `json:"dataUrl,omitempty"`
-	Volume  int    `json:"volume"`
+	Mode      string `json:"mode"`
+	Preset    string `json:"preset,omitempty"`
+	DataURL   string `json:"dataUrl,omitempty"`
+	CustomKey string `json:"customKey,omitempty"`
+	Volume    int    `json:"volume"`
 }
 
 // NotificationSoundsPayload carries resolved sound sources into WhatsApp pages.
@@ -156,4 +159,33 @@ func NormalizeNotificationSoundSettings(settings NotificationSoundSettings) (Not
 		return NotificationSoundSettings{}, err
 	}
 	return NotificationSoundSettings{Message: msg, Call: call}, nil
+}
+
+// ForPage returns a lightweight copy without inline DataURL blobs so preload
+// and EvalContext calls stay tiny; custom audio is fetched via ProfileBridge.
+func (p NotificationSoundsPayload) ForPage() NotificationSoundsPayload {
+	strip := func(ch NotificationSoundChannel) NotificationSoundChannel {
+		if ch.Mode == SoundModeCustom && ch.DataURL != "" && ch.CustomKey == "" {
+			sum := sha256.Sum256([]byte(ch.DataURL))
+			ch.CustomKey = hex.EncodeToString(sum[:8])
+		}
+		ch.DataURL = ""
+		return ch
+	}
+	return NotificationSoundsPayload{
+		Message: strip(p.Message),
+		Call:    strip(p.Call),
+	}
+}
+
+// DataForKind returns the stored DataURL for the requested sound channel.
+func (p NotificationSoundsPayload) DataForKind(kind string) string {
+	switch kind {
+	case SoundKindMessage:
+		return p.Message.DataURL
+	case SoundKindCall:
+		return p.Call.DataURL
+	default:
+		return ""
+	}
 }

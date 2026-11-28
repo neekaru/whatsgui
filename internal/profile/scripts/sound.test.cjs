@@ -48,8 +48,18 @@ function setup(initialSounds) {
     }
   }
 
+  const bridgeCalls = [];
   const window = {
     __workspaceNotificationSounds: initialSounds,
+    mygo: {
+      call: async (method, kind) => {
+        bridgeCalls.push([method, kind]);
+        if (method === 'ProfileBridge.NotificationSoundData') {
+          return kind === 'call' ? CUSTOM_CALL : CUSTOM_MSG;
+        }
+        return '';
+      },
+    },
   };
   window.top = window;
 
@@ -75,7 +85,7 @@ function setup(initialSounds) {
     return el;
   };
 
-  return { window, document, makeAudio, playCalls, pauseCalls, createdBlobs, revokedUrls, HTMLMediaElement };
+  return { window, document, makeAudio, playCalls, pauseCalls, createdBlobs, revokedUrls, bridgeCalls, HTMLMediaElement };
 }
 
 const DEFAULT_MSG = 'https://static.whatsapp.net/rsrc.php/yv/r/BS_BUUXbKq5.mp3';
@@ -168,4 +178,21 @@ test('synthesizes built-in WAV presets and supports mute mode + live updates', a
   assert.equal(playCalls.length, 3);
   assert.notEqual(playCalls[2], ring);
   assert.equal(playCalls[2].loop, true);
+});
+
+test('fetches custom audio lazily via ProfileBridge when only customKey is supplied', async () => {
+  const { makeAudio, playCalls, createdBlobs, bridgeCalls } = setup({
+    message: { mode: 'custom', customKey: 'abc123', volume: 75 },
+    call: { mode: 'default', volume: 100 },
+  });
+
+  const msg = makeAudio(DEFAULT_MSG);
+  await msg.play();
+  await msg.play();
+
+  assert.deepEqual(bridgeCalls, [['ProfileBridge.NotificationSoundData', 'message']]);
+  assert.equal(playCalls.length, 2);
+  assert.equal(playCalls[0].volume, 0.75);
+  assert.equal(createdBlobs.length, 1);
+  assert.equal(await createdBlobs[0].text(), 'msg-audio');
 });

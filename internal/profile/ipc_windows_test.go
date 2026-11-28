@@ -108,4 +108,20 @@ func TestMediaCommands(t *testing.T) {
 	if err != nil || cmd.Action != "sounds" || cmd.Sounds == nil || cmd.Sounds.Message.Preset != "chime" || cmd.Sounds.Call.Mode != SoundModeMute {
 		t.Fatalf("perintah sounds valid ditolak: %+v %v", cmd, err)
 	}
+
+	payload := NotificationSoundsPayload{
+		Message: NotificationSoundChannel{Mode: SoundModeCustom, DataURL: "data:audio/mpeg;base64,Zm9v", Volume: 80},
+		Call:    NotificationSoundChannel{Mode: SoundModeDefault, Volume: 100},
+	}
+	forPage := payload.ForPage()
+	if forPage.Message.DataURL != "" || forPage.Message.CustomKey == "" {
+		t.Fatalf("ForPage tidak menyembunyikan DataURL: %+v", forPage)
+	}
+	bridge := &ProfileBridge{soundData: payload.DataForKind}
+	if got, err := bridge.NotificationSoundData(SoundKindMessage); err != nil || got != payload.Message.DataURL {
+		t.Fatalf("NotificationSoundData = (%q, %v), ingin %q", got, err, payload.Message.DataURL)
+	}
+	if _, err := bridge.NotificationSoundData("other"); err == nil {
+		t.Fatal("jenis suara tidak valid diterima oleh bridge")
+	}
 }

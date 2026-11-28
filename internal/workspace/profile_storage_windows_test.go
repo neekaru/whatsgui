@@ -327,6 +327,61 @@ func TestOpenWorkspaceMigratesLegacyAppOnBoot(t *testing.T) {
 	}
 }
 
+func TestOpenWorkspaceSkipsMigrationWhenAlreadyInitialized(t *testing.T) {
+	roamingRoot := t.TempDir()
+	localRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", localRoot)
+	t.Setenv("APPDATA", roamingRoot)
+
+	oldName := legacyAppName(mygo.App.Name())
+	if oldName == "" {
+		t.Skip("test binary already uses legacy app name")
+	}
+
+	tab := newTab("Utama")
+	newUserData := filepath.Join(roamingRoot, mygo.App.Name())
+	if err := os.MkdirAll(newUserData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tabsJSON := `{"tabs":[{"id":"` + tab.ID + `","name":"Utama"}],"activeId":"` + tab.ID + `"}`
+	if err := os.WriteFile(filepath.Join(newUserData, "tabs.json"), []byte(tabsJSON), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Legacy app files sitting side-by-side must not trigger app migration once WhatsGUI already owns tabs.json.
+	oldUserData := filepath.Join(roamingRoot, oldName)
+	if err := os.MkdirAll(oldUserData, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldUserData, "extra.txt"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldLocalProfiles := filepath.Join(localRoot, oldName, "profiles", tab.ID)
+	if err := os.MkdirAll(oldLocalProfiles, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(oldLocalProfiles, "marker"), []byte("untouched"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mygo.App.SetPath(mygo.PathUserData, newUserData)
+	t.Cleanup(func() { mygo.App.SetPath(mygo.PathUserData, "") })
+
+	w, err := openWorkspace()
+	if err != nil {
+		t.Fatalf("openWorkspace gagal padahal WhatsGUI sudah aktif: %v", err)
+	}
+	if len(w.data.Tabs) != 1 || w.data.Tabs[0].ID != tab.ID {
+		t.Fatalf("tab berubah tak terduga: %+v", w.data.Tabs)
+	}
+	if _, err := os.Stat(filepath.Join(oldUserData, "extra.txt")); err != nil {
+		t.Fatalf("data roaming lama tersentuh saat migrasi seharusnya dilewati: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(oldLocalProfiles, "marker")); err != nil {
+		t.Fatalf("data profil lama tersentuh saat migrasi seharusnya dilewati: %v", err)
+	}
+}
+
 func TestMaybeUninstallLegacyApp(t *testing.T) {
 	setupInstalled := func(t *testing.T) (newExe, legacyUninst, oldUser, newUser, oldLocal string, reg map[string]uninstallEntry) {
 		t.Helper()

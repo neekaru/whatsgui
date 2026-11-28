@@ -1,5 +1,5 @@
 (() => {
-  if (!/(^|\.)whatsapp\.(net|com)$/.test(location.hostname)) return;
+  if (!/(^|\.)whatsapp\.(net|com)$/.test(location.hostname) || window !== window.top) return;
   if (HTMLMediaElement.prototype.play?.__workspaceSoundHooked) return;
 
   const MESSAGE_SOUND_FILES = new Set(['BS_BUUXbKq5.mp3']);
@@ -52,12 +52,13 @@
 
   const presetUrlCache = new Map();
   const customUrlCache = new Map();
+  const pendingCustomLoads = new Map();
   const channelAudios = { message: null, call: null };
   const activeCustom = new WeakMap();
 
   const defaultConfig = () => ({
-    message: { mode: 'default', preset: 'chime', dataUrl: '', volume: 100 },
-    call: { mode: 'default', preset: 'classic', dataUrl: '', volume: 100 },
+    message: { mode: 'default', preset: 'chime', dataUrl: '', customKey: '', volume: 100 },
+    call: { mode: 'default', preset: 'classic', dataUrl: '', customKey: '', volume: 100 },
   });
 
   const config = defaultConfig();
@@ -107,22 +108,62 @@
     return URL.createObjectURL(new Blob([buffer], { type: 'audio/wav' }));
   }
 
-  function dataUrlToBlobUrl(dataUrl) {
-    if (customUrlCache.has(dataUrl)) return customUrlCache.get(dataUrl);
+  function dataUrlToBlobUrl(dataUrl, cacheKey = dataUrl) {
+    if (customUrlCache.has(cacheKey)) return customUrlCache.get(cacheKey);
     const match = /^data:([^;,]*)(?:;[^,]*)?;base64,(.*)$/s.exec(dataUrl);
     if (!match) throw new Error('Not a base64 data URL');
     const binary = atob(match[2]);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     const blobUrl = URL.createObjectURL(new Blob([bytes], { type: match[1] || 'audio/mpeg' }));
-    customUrlCache.set(dataUrl, blobUrl);
+    customUrlCache.set(cacheKey, blobUrl);
     return blobUrl;
+  }
+
+  function channelCacheKey(ch) {
+    return ch?.customKey || ch?.dataUrl || '';
+  }
+
+  function fetchCustomAudio(kind, ch) {
+    const key = channelCacheKey(ch);
+    if (!ch || ch.mode !== 'custom' || !key) return Promise.resolve(null);
+    if (customUrlCache.has(key)) return Promise.resolve(ensureChannelAudio(kind));
+    if (ch.dataUrl) {
+      try {
+        return Promise.resolve(ensureChannelAudio(kind));
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
+    const existing = pendingCustomLoads.get(kind);
+    if (existing && existing.key === key) return existing.promise;
+    if (typeof window.mygo?.call !== 'function') return Promise.resolve(null);
+    const promise = window.mygo
+      .call('ProfileBridge.NotificationSoundData', kind)
+      .then((dataUrl) => {
+        if (!dataUrl) return null;
+        dataUrlToBlobUrl(dataUrl, key);
+        if (config[kind]?.mode === 'custom' && channelCacheKey(config[kind]) === key) {
+          return ensureChannelAudio(kind);
+        }
+        return null;
+      })
+      .finally(() => {
+        const cur = pendingCustomLoads.get(kind);
+        if (cur && cur.key === key) pendingCustomLoads.delete(kind);
+      });
+    pendingCustomLoads.set(kind, { key, promise });
+    return promise;
   }
 
   function resolveChannelUrl(kind, ch) {
     if (!ch || ch.mode === 'default' || ch.mode === 'mute') return '';
-    if (ch.mode === 'custom' && ch.dataUrl) {
-      return dataUrlToBlobUrl(ch.dataUrl);
+    if (ch.mode === 'custom') {
+      const key = channelCacheKey(ch);
+      if (!key) return '';
+      if (customUrlCache.has(key)) return customUrlCache.get(key);
+      if (ch.dataUrl) return dataUrlToBlobUrl(ch.dataUrl, key);
+      return '';
     }
     if (ch.mode === 'preset') {
       const key = `${kind}:${ch.preset || (kind === 'call' ? 'classic' : 'chime')}`;
@@ -221,23 +262,32 @@
     for (const kind of ['message', 'call']) {
       if (!next[kind] || typeof next[kind] !== 'object') continue;
       const incoming = next[kind];
-      const prevDataUrl = config[kind]?.dataUrl;
+      const prevKey = channelCacheKey(config[kind]);
       config[kind] = {
         mode: incoming.mode || 'default',
         preset: incoming.preset || (kind === 'call' ? 'classic' : 'chime'),
         dataUrl: incoming.dataUrl || '',
+        customKey: incoming.customKey || '',
         volume: incoming.volume ?? 100,
       };
-      if (prevDataUrl && prevDataUrl !== config[kind].dataUrl && customUrlCache.has(prevDataUrl)) {
-        const stillUsed = config.message.dataUrl === prevDataUrl || config.call.dataUrl === prevDataUrl;
+      const nextKey = channelCacheKey(config[kind]);
+      if (prevKey && prevKey !== nextKey && customUrlCache.has(prevKey)) {
+        const stillUsed = channelCacheKey(config.message) === prevKey || channelCacheKey(config.call) === prevKey;
         if (!stillUsed) {
-          URL.revokeObjectURL?.(customUrlCache.get(prevDataUrl));
-          customUrlCache.delete(prevDataUrl);
+          URL.revokeObjectURL?.(customUrlCache.get(prevKey));
+          customUrlCache.delete(prevKey);
         }
       }
       if (config[kind].mode === 'default' || config[kind].mode === 'mute') {
         stopChannelAudio(kind);
         channelAudios[kind] = null;
+      } else if (config[kind].mode === 'custom' && !config[kind].dataUrl && config[kind].customKey && !customUrlCache.has(config[kind].customKey)) {
+        stopChannelAudio(kind);
+        channelAudios[kind] = null;
+        void fetchCustomAudio(kind, config[kind]).catch((err) => {
+          console.error('[Workspace Sound] invalid custom sound:', err);
+          channelAudios[kind] = null;
+        });
       } else {
         try {
           ensureChannelAudio(kind);
@@ -252,6 +302,19 @@
   const originalPlay = HTMLMediaElement.prototype.play;
   const originalPause = HTMLMediaElement.prototype.pause;
 
+  function playCustomInstance(originalElement, kind, ch, custom, args) {
+    custom.currentTime = 0;
+    custom.loop = kind === 'call';
+    custom.volume = clampVolume(ch.volume);
+    if (kind === 'call') {
+      activeCustom.set(originalElement, custom);
+    }
+    return originalPlay.call(custom).catch(() => {
+      if (kind === 'call') activeCustom.delete(originalElement);
+      return originalPlay.apply(originalElement, args);
+    });
+  }
+
   function playWrapper(...args) {
     try {
       const sound = classify(this);
@@ -263,16 +326,17 @@
         if (ch && ch.mode !== 'default') {
           const custom = ensureChannelAudio(sound.kind);
           if (custom) {
-            custom.currentTime = 0;
-            custom.loop = sound.kind === 'call';
-            custom.volume = clampVolume(ch.volume);
-            if (sound.kind === 'call') {
-              activeCustom.set(this, custom);
-            }
-            return originalPlay.call(custom).catch(() => {
-              if (sound.kind === 'call') activeCustom.delete(this);
-              return originalPlay.apply(this, args);
-            });
+            return playCustomInstance(this, sound.kind, ch, custom, args);
+          }
+          if (ch.mode === 'custom' && channelCacheKey(ch)) {
+            return fetchCustomAudio(sound.kind, ch)
+              .then((loaded) => {
+                if (loaded && config[sound.kind]?.mode === 'custom' && channelCacheKey(config[sound.kind]) === channelCacheKey(ch)) {
+                  return playCustomInstance(this, sound.kind, config[sound.kind], loaded, args);
+                }
+                return originalPlay.apply(this, args);
+              })
+              .catch(() => originalPlay.apply(this, args));
           }
         }
       } else if (sound && sound.url) {

@@ -68,31 +68,38 @@ func (w *Workspace) profileDataDirs(id string) []string {
 func (w *Workspace) migrateProfile(id string) error {
 	oldRoot := legacyProfileDirectory(profileName(id))
 	newRoot := w.profileDir(id)
-
-	oldHas, err := dirHasData(oldRoot)
-	if err != nil {
-		return fmt.Errorf("profil %s: %w", id, err)
+	if strings.EqualFold(filepath.Clean(oldRoot), filepath.Clean(newRoot)) {
+		return nil
 	}
-	if oldHas {
-		newHas, err := dirHasData(newRoot)
+
+	_, oldStatErr := os.Stat(oldRoot)
+	oldExists := oldStatErr == nil || !errors.Is(oldStatErr, os.ErrNotExist)
+	if oldExists {
+		oldHas, err := dirHasData(oldRoot)
 		if err != nil {
 			return fmt.Errorf("profil %s: %w", id, err)
 		}
-		if newHas {
-			return fmt.Errorf("profil %s memiliki data di %s dan %s sekaligus; pindahkan salah satunya", id, oldRoot, newRoot)
+		if oldHas {
+			newHas, err := dirHasData(newRoot)
+			if err != nil {
+				return fmt.Errorf("profil %s: %w", id, err)
+			}
+			if newHas {
+				return fmt.Errorf("profil %s memiliki data di %s dan %s sekaligus; pindahkan salah satunya", id, oldRoot, newRoot)
+			}
+			if err := os.MkdirAll(filepath.Dir(newRoot), 0o700); err != nil {
+				return fmt.Errorf("profil %s: %w", id, err)
+			}
+			// Only remove an empty target; never overwrite a session.
+			if err := os.RemoveAll(newRoot); err != nil {
+				return fmt.Errorf("profil %s: %w", id, err)
+			}
+			if err := os.Rename(oldRoot, newRoot); err != nil {
+				return fmt.Errorf("memindahkan data profil %s: %w", id, err)
+			}
+		} else if err := os.RemoveAll(oldRoot); err != nil {
+			return fmt.Errorf("membersihkan folder kosong profil %s: %w", id, err)
 		}
-		if err := os.MkdirAll(filepath.Dir(newRoot), 0o700); err != nil {
-			return fmt.Errorf("profil %s: %w", id, err)
-		}
-		// Only remove an empty target; never overwrite a session.
-		if err := os.RemoveAll(newRoot); err != nil {
-			return fmt.Errorf("profil %s: %w", id, err)
-		}
-		if err := os.Rename(oldRoot, newRoot); err != nil {
-			return fmt.Errorf("memindahkan data profil %s: %w", id, err)
-		}
-	} else if err := os.RemoveAll(oldRoot); err != nil {
-		return fmt.Errorf("membersihkan folder kosong profil %s: %w", id, err)
 	}
 	settings := legacySettingsDirectory(profileName(id))
 	if settings == "" || strings.EqualFold(settings, oldRoot) || strings.EqualFold(settings, newRoot) {
@@ -167,11 +174,19 @@ const (
 
 // legacyAppName resolves the pre-rename directory name matching prod or dev builds.
 func legacyAppName(currentName string) string {
-	if strings.EqualFold(currentName, legacyAppBaseName) || strings.EqualFold(currentName, legacyAppBaseName+" Dev") {
+	trimmed := strings.TrimSpace(currentName)
+	if trimmed == "" || strings.EqualFold(trimmed, legacyAppBaseName) || strings.EqualFold(trimmed, legacyAppBaseName+" Dev") {
 		return ""
 	}
-	if strings.HasSuffix(currentName, " Dev") {
-		return legacyAppBaseName + " Dev"
+	if strings.HasSuffix(trimmed, " Dev") {
+		candidate := legacyAppBaseName + " Dev"
+		if strings.EqualFold(candidate, trimmed) {
+			return ""
+		}
+		return candidate
+	}
+	if strings.EqualFold(legacyAppBaseName, trimmed) {
+		return ""
 	}
 	return legacyAppBaseName
 }
@@ -180,6 +195,12 @@ func legacyAppName(currentName string) string {
 // the pre-rename app directory into the new app directory on startup without
 // overwriting existing data. It reports whether any data was migrated.
 func migrateAppStorage(oldUserData, newUserData, oldLocalData, newLocalData string) (bool, error) {
+	if oldUserData == "" || newUserData == "" || strings.EqualFold(filepath.Clean(oldUserData), filepath.Clean(newUserData)) {
+		return false, nil
+	}
+	if fileExistsRegular(filepath.Join(newUserData, "tabs.json")) {
+		return false, nil
+	}
 	roamingMoved, err := migrateDirIfTargetEmpty(oldUserData, newUserData)
 	if err != nil {
 		return false, err

@@ -31,6 +31,9 @@ const EnvProfileData = "WHATSAPP_PROFILE_DATA"
 //go:embed scripts/passive_events.js
 var passiveEventsScript string
 
+//go:embed scripts/preload_guard.js
+var preloadGuardScript string
+
 //go:embed scripts/appearance.js
 var appearanceScript string
 
@@ -51,7 +54,7 @@ var unreadScript string
 
 // preloadScript runs in every WhatsApp page: the main window and call popups.
 // Appearance is seeded with the workspace selection before WhatsApp boots.
-var preloadScript = passiveEventsScript + "\n" + appearanceScript + "\n" + notificationScript + "\n" + soundScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
+var preloadScript = passiveEventsScript + "\n" + preloadGuardScript + "\n" + appearanceScript + "\n" + notificationScript + "\n" + soundScript + "\n" + mediaScript + "\n" + statusBackgroundScript + "\n" + unreadScript
 
 type worker struct {
 	conn             *connection
@@ -128,7 +131,7 @@ func Run(name string) error {
 	// and changing it later needs a new worker. The user's languages follow
 	// as fallbacks, so Indonesian leads the requests.
 	mygo.App.SetLanguages("id")
-	mygo.Bind(&ProfileBridge{conn: conn, gm: w.gm, ctx: ctx})
+	mygo.Bind(&ProfileBridge{conn: conn, gm: w.gm, ctx: ctx, soundData: w.soundData})
 	mygo.App.WhenReady(func() { w.open(cancel) })
 	return mygo.App.Run()
 }
@@ -355,7 +358,7 @@ func (w *worker) preload() string {
 		gmSnapshot = w.gm.snapshotJSON()
 	}
 	w.soundsMu.Lock()
-	soundsJSON, _ := json.Marshal(w.sounds)
+	soundsJSON, _ := json.Marshal(w.sounds.ForPage())
 	w.soundsMu.Unlock()
 	var out strings.Builder
 	out.WriteString("window.__workspaceAppearance = {theme: ")
@@ -381,14 +384,22 @@ func (w *worker) preload() string {
 	return out.String()
 }
 
+func (w *worker) soundData(kind string) string {
+	w.soundsMu.Lock()
+	defer w.soundsMu.Unlock()
+	return w.sounds.DataForKind(kind)
+}
+
 func (w *worker) applySounds() {
 	w.soundsMu.Lock()
-	soundsJSON, _ := json.Marshal(w.sounds)
+	soundsJSON, _ := json.Marshal(w.sounds.ForPage())
 	w.soundsMu.Unlock()
 	w.pagesMu.Lock()
 	pages := make([]*mygo.Page, 0, len(w.pages))
 	for page := range w.pages {
-		pages = append(pages, page)
+		if page != nil {
+			pages = append(pages, page)
+		}
 	}
 	w.pagesMu.Unlock()
 	script := "window.__workspaceApplyNotificationSounds?.(" + string(soundsJSON) + ")"

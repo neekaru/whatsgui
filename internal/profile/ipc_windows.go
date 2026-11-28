@@ -177,9 +177,10 @@ func ValidID(id string) bool {
 
 // ProfileBridge exposes notifications and bounded userscript GM APIs to the page.
 type ProfileBridge struct {
-	conn *connection
-	gm   *gmStorage
-	ctx  context.Context
+	conn      *connection
+	gm        *gmStorage
+	ctx       context.Context
+	soundData func(kind string) string
 }
 
 func (b *ProfileBridge) Notify(title, body, token string, silent bool, encodedImage string) error {
@@ -265,4 +266,15 @@ func (b *ProfileBridge) GMOpenInTab(rawURL string) error {
 		return errors.New("URL GM_openInTab tidak valid")
 	}
 	return b.conn.send(Message{Kind: "external", URL: u.String()})
+}
+
+// NotificationSoundData returns the saved custom audio data URL for the given channel.
+func (b *ProfileBridge) NotificationSoundData(kind string) (string, error) {
+	if !ValidSoundKind(kind) {
+		return "", errors.New("jenis suara notifikasi tidak valid")
+	}
+	if b.soundData == nil {
+		return "", nil
+	}
+	return b.soundData(kind), nil
 }
